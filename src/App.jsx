@@ -747,6 +747,18 @@ function App() {
     const canPaste = Boolean(styleClipboard);
     const clipboardType = styleClipboard?.type ?? null;
 
+    const sanitizeFileBaseName = (rawName) => {
+        const source = (String(rawName || '').trim() || 'timing-diagram');
+        const cleaned = source
+            .split('')
+            .filter((ch) => ch.charCodeAt(0) >= 32 && !/[<>:"/\\|?*]/.test(ch))
+            .join('');
+        return cleaned
+            .replace(/\s+/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '');
+    };
+
     useEffect(() => {
         const handler = (event) => {
             const key = event.key.toLowerCase();
@@ -778,11 +790,7 @@ function App() {
     const downloadSVG = () => {
         const svgElement = document.querySelector('.diagram-canvas svg');
         if (!svgElement) return;
-        const baseName = ((state.diagramName || '').trim() || 'timing-diagram')
-            .replace(/[<>:"/\\|?*\x00-\x1f]/g, '')
-            .replace(/\s+/g, '-')
-            .replace(/-+/g, '-')
-            .replace(/^-|-$/g, '');
+        const baseName = sanitizeFileBaseName(state.diagramName);
         const svgData = new XMLSerializer().serializeToString(svgElement);
         const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
         const svgUrl = URL.createObjectURL(svgBlob);
@@ -796,11 +804,7 @@ function App() {
     };
 
     const saveConfig = () => {
-        const baseName = ((state.diagramName || '').trim() || 'timing-diagram')
-            .replace(/[<>:"/\\|?*\x00-\x1f]/g, '')
-            .replace(/\s+/g, '-')
-            .replace(/-+/g, '-')
-            .replace(/^-|-$/g, '');
+        const baseName = sanitizeFileBaseName(state.diagramName);
         const data = JSON.stringify(state, null, 2);
         const blob = new Blob([data], { type: 'application/json' });
         const url = URL.createObjectURL(blob);

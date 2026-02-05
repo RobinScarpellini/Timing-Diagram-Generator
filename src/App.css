@@ -45,7 +45,7 @@ body {
 
 .right-sidebar-tabs {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(3, 1fr);
     gap: 0;
     background: #ffffff;
     border-bottom: 1px solid #e2e8f0;
