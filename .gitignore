@@ -1,0 +1,22 @@
+# node_modules
+node_modules/
+
+# Build outputs
+dist/
+dist-ssr/
+*.local
+
+# Vite / IDE caches
+.vite/
+.vscode/
+.idea/
+.DS_Store
+.codex/
+.serena/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+Thumbs.db
