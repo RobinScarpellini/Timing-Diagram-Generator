@@ -1,15 +1,12 @@
 import React, { useMemo } from 'react';
 import {
-    COUNTER_BOX_HEIGHT,
-    DIAGRAM_HEIGHT_OFFSET,
     DIAGRAM_LABEL_COLUMN_WIDTH,
     DIAGRAM_MIN_HEIGHT,
-    DIAGRAM_PADDING,
-    OSC_WAVE_HEIGHT,
-    SIGNAL_ROW_BASE_Y
+    DIAGRAM_PADDING
 } from '../constants/layout';
-import { getOscillatorLevelAt, getSignalEdgeTime } from '../diagram/geometry';
+import { getOscillatorLevelAt, getSafeOscillatorPeriod, getSignalEdgeTime } from '../diagram/geometry';
 import { estimateLegendSize, resolveLegendPosition } from '../diagram/legend';
+import { computeDiagramHeightFromLayout, computeSignalLayout, makeSignalLayoutMap } from '../diagram/signalLayout';
 
 const getDashPatternValue = (style, len, gap) => {
     if (style === 'dashed') return `${len},${gap}`;
@@ -20,7 +17,7 @@ const getDashPatternValue = (style, len, gap) => {
 const renderLinkElements = ({
     links,
     signals,
-    spacing,
+    signalLayoutById,
     timeScale,
     labelColumnWidth,
     selection,
@@ -46,10 +43,13 @@ const renderLinkElements = ({
 
         if (!sStart || !sEnd) return null;
 
-        const oIdxS = signals.indexOf(sStart);
-        const oIdxE = signals.indexOf(sEnd);
-        const ySBase = oIdxS * spacing + SIGNAL_ROW_BASE_Y;
-        const yEBase = oIdxE * spacing + SIGNAL_ROW_BASE_Y;
+        const geoStart = signalLayoutById.get(sStart.id);
+        const geoEnd = signalLayoutById.get(sEnd.id);
+        if (!geoStart || !geoEnd) return null;
+        const ySBase = geoStart.bottom;
+        const yEBase = geoEnd.bottom;
+        const startHeight = geoStart.height;
+        const endHeight = geoEnd.height;
 
         const tStart = getSignalEdgeTime(sStart, link.start.edgeIndex, edgeTimeCtx);
         const tEnd = getSignalEdgeTime(sEnd, link.end.edgeIndex, edgeTimeCtx);
@@ -58,11 +58,11 @@ const renderLinkElements = ({
 
         let yS;
         let yE;
-        if (oIdxS < oIdxE) {
+        if (geoStart.index < geoEnd.index) {
             yS = ySBase;
-            yE = yEBase - (sEnd.type === 'counter' ? COUNTER_BOX_HEIGHT : OSC_WAVE_HEIGHT);
+            yE = yEBase - endHeight;
         } else {
-            yS = ySBase - (sStart.type === 'counter' ? COUNTER_BOX_HEIGHT : OSC_WAVE_HEIGHT);
+            yS = ySBase - startHeight;
             yE = yEBase;
         }
 
@@ -94,8 +94,8 @@ const renderLinkElements = ({
                         }
                     }}
                 />
-                <line x1={x1} y1={ySBase} x2={x1} y2={ySBase - (sStart.type === 'counter' ? COUNTER_BOX_HEIGHT : OSC_WAVE_HEIGHT)} stroke={linkStrokeColor} strokeWidth={(link.lineWidth || linkLineWidth) * 0.5} strokeDasharray={dash} opacity="0.2" />
-                <line x1={x2} y1={yEBase} x2={x2} y2={yEBase - (sEnd.type === 'counter' ? COUNTER_BOX_HEIGHT : OSC_WAVE_HEIGHT)} stroke={linkStrokeColor} strokeWidth={(link.lineWidth || linkLineWidth) * 0.5} strokeDasharray={dash} opacity="0.2" />
+                <line x1={x1} y1={ySBase} x2={x1} y2={ySBase - startHeight} stroke={linkStrokeColor} strokeWidth={(link.lineWidth || linkLineWidth) * 0.5} strokeDasharray={dash} opacity="0.2" />
+                <line x1={x2} y1={yEBase} x2={x2} y2={yEBase - endHeight} stroke={linkStrokeColor} strokeWidth={(link.lineWidth || linkLineWidth) * 0.5} strokeDasharray={dash} opacity="0.2" />
                 <line
                     x1={x1} y1={yS} x2={x2} y2={yE}
                     stroke={linkStrokeColor}
@@ -120,19 +120,38 @@ const renderLinkElements = ({
                     const pos = link.arrowLabel?.position || 'above';
                     const midX = (x1 + x2) / 2;
                     const midY = (yS + yE) / 2;
-                    const dy = pos === 'below' ? (size + 6) : -6;
+                    const isCenter = pos === 'center';
+                    const dy = pos === 'below' ? (size + 6) : pos === 'above' ? -6 : 0;
+                    const textValue = String(label);
+                    const padX = 6;
+                    const padY = 3;
+                    const labelW = textValue.length * size * 0.62 + padX * 2;
+                    const labelH = size + padY * 2;
+                    const textY = midY + dy;
                     return (
-                        <text
-                            x={midX}
-                            y={midY + dy}
-                            fontSize={size}
-                            fontFamily={fontFamily}
-                            fill={linkStrokeColor}
-                            textAnchor="middle"
-                            pointerEvents="none"
-                        >
-                            {String(label)}
-                        </text>
+                        <g pointerEvents="none">
+                            {isCenter && (
+                                <rect
+                                    x={midX - labelW / 2}
+                                    y={textY - size * 0.82}
+                                    width={labelW}
+                                    height={labelH}
+                                    fill="#ffffff"
+                                    rx={3}
+                                    ry={3}
+                                />
+                            )}
+                            <text
+                                x={midX}
+                                y={textY}
+                                fontSize={size}
+                                fontFamily={fontFamily}
+                                fill={linkStrokeColor}
+                                textAnchor="middle"
+                            >
+                                {textValue}
+                            </text>
+                        </g>
                     );
                 })()}
             </g>
@@ -143,7 +162,7 @@ const renderLinkElements = ({
 const renderGuideElements = ({
     guides,
     signals,
-    spacing,
+    signalLayoutById,
     duration,
     timeScale,
     labelColumnWidth,
@@ -152,6 +171,9 @@ const renderGuideElements = ({
     guideDashLength,
     guideDashGap,
     guideLineWidth,
+    guideUseRelativeExtents,
+    guideUpperExtension,
+    guideLowerExtension,
     selection,
     creationMode,
     canInteractWithElement,
@@ -163,14 +185,26 @@ const renderGuideElements = ({
     return guides.map((g) => {
         const osc = signals.find((s) => s.id === g.oscId);
         if (!osc) return null;
-        const oscIndex = signals.findIndex((s) => s.id === g.oscId);
-        const yBase = oscIndex * spacing + SIGNAL_ROW_BASE_Y;
-        const edgeY = yBase - OSC_WAVE_HEIGHT / 2;
+        const geo = signalLayoutById.get(g.oscId);
+        if (!geo) return null;
+        const edgeY = geo.mid;
         const hasCustomExtents = Number.isFinite(g.upperExtension) && Number.isFinite(g.lowerExtension);
-        const yTop = hasCustomExtents ? Math.max(0, edgeY - g.upperExtension) : 0;
-        const yBottom = hasCustomExtents ? Math.min(guideHeight, edgeY + g.lowerExtension) : guideHeight;
+        const useGlobalExtents = !hasCustomExtents && guideUseRelativeExtents;
+        const upper = hasCustomExtents
+            ? g.upperExtension
+            : useGlobalExtents
+                ? guideUpperExtension
+                : null;
+        const lower = hasCustomExtents
+            ? g.lowerExtension
+            : useGlobalExtents
+                ? guideLowerExtension
+                : null;
+        const yTop = Number.isFinite(upper) ? Math.max(0, edgeY - upper) : 0;
+        const yBottom = Number.isFinite(lower) ? Math.min(guideHeight, edgeY + lower) : guideHeight;
 
-        const t = (osc.delay || 0) + g.edgeIndex * ((osc.period || 100) / 2);
+        const period = getSafeOscillatorPeriod(osc, duration);
+        const t = (osc.delay || 0) + g.edgeIndex * (period / 2);
         if (t < 0 || t > duration) return null;
         const x = labelColumnWidth + t * timeScale;
 
@@ -241,7 +275,7 @@ const renderMeasurementElements = ({
     const resolveEdgeTime = (oscId, edgeIndex) => {
         const osc = signals.find((s) => s.id === oscId && s.type === 'oscillator');
         if (!osc) return null;
-        const t = (osc.delay || 0) + edgeIndex * ((osc.period || 100) / 2);
+        const t = (osc.delay || 0) + edgeIndex * (getSafeOscillatorPeriod(osc, duration) / 2);
         if (t < 0 || t > duration) return null;
         return t;
     };
@@ -269,7 +303,8 @@ const renderMeasurementElements = ({
         const xMin = Math.min(x1, x2);
         const xMax = Math.max(x1, x2);
 
-        const y = 24 + index * 14;
+        const yFallback = 24 + index * 14;
+        const y = Number.isFinite(m.y) ? m.y : yFallback;
         const color = m.color || '#000000';
         const width = m.lineWidth || 1.2;
         const size = m.arrowSize ?? 10;
@@ -327,20 +362,39 @@ const renderMeasurementElements = ({
                     if (!label || !String(label).trim().length) return null;
                     const sizeLabel = Math.max(6, m.arrowLabel?.size ?? defaultLabelSize ?? 10);
                     const pos = m.arrowLabel?.position || 'top';
-                    const dy = pos === 'bottom' ? (sizeLabel + 6) : -6;
+                    const isCenter = pos === 'center';
+                    const dy = pos === 'bottom' ? (sizeLabel + 6) : pos === 'top' ? -6 : 0;
                     const midX = (xMin + xMax) / 2;
+                    const textValue = String(label);
+                    const padX = 6;
+                    const padY = 3;
+                    const labelW = textValue.length * sizeLabel * 0.62 + padX * 2;
+                    const labelH = sizeLabel + padY * 2;
+                    const textY = y + dy;
                     return (
-                        <text
-                            x={midX}
-                            y={y + dy}
-                            fontSize={sizeLabel}
-                            fontFamily={fontFamily}
-                            fill={color}
-                            textAnchor="middle"
-                            pointerEvents="none"
-                        >
-                            {String(label)}
-                        </text>
+                        <g pointerEvents="none">
+                            {isCenter && (
+                                <rect
+                                    x={midX - labelW / 2}
+                                    y={textY - sizeLabel * 0.82}
+                                    width={labelW}
+                                    height={labelH}
+                                    fill="#ffffff"
+                                    rx={3}
+                                    ry={3}
+                                />
+                            )}
+                            <text
+                                x={midX}
+                                y={textY}
+                                fontSize={sizeLabel}
+                                fontFamily={fontFamily}
+                                fill={color}
+                                textAnchor="middle"
+                            >
+                                {textValue}
+                            </text>
+                        </g>
                     );
                 })()}
             </g>
@@ -361,6 +415,12 @@ const Diagram = ({
     linkStartMarker, linkEndMarker, linkColor, arrowSize,
     guideLineWidth, guideStyle, guideDashLength, guideDashGap,
     guideExtraHeight,
+    guideUseRelativeExtents,
+    guideUpperExtension,
+    guideLowerExtension,
+    oscWaveHeight,
+    counterWaveHeight,
+    signalSpacingMode,
     zoneBorderWidth, zonePatternWidth, hatchType, zoneColor,
     counterFontSize,
     selection,
@@ -385,12 +445,20 @@ const Diagram = ({
     const orderedLinks = useMemo(() => orderByLayer(links || [], layerOrder?.links), [links, layerOrder]);
     const orderedEdgeArrows = useMemo(() => orderByLayer(edgeArrows || [], layerOrder?.edgeArrows), [edgeArrows, layerOrder]);
     const orderedMeasurements = useMemo(() => orderByLayer(measurements || [], layerOrder?.measurements), [measurements, layerOrder]);
+    const effectiveSettings = useMemo(() => ({
+        spacing,
+        signalSpacingMode,
+        oscWaveHeight,
+        counterWaveHeight
+    }), [spacing, signalSpacingMode, oscWaveHeight, counterWaveHeight]);
+    const signalRows = useMemo(() => computeSignalLayout(signals, effectiveSettings), [signals, effectiveSettings]);
+    const signalLayoutById = useMemo(() => makeSignalLayoutMap(signalRows), [signalRows]);
 
     const labelColumnWidth = DIAGRAM_LABEL_COLUMN_WIDTH;
     const extraLeft = Math.max(0, -(labelX || 0));
     const width = duration * timeScale + labelColumnWidth + DIAGRAM_PADDING + extraLeft;
 
-    const baseHeight = Math.max(DIAGRAM_MIN_HEIGHT, (signals.length - 1) * spacing + DIAGRAM_HEIGHT_OFFSET);
+    const baseHeight = Math.max(DIAGRAM_MIN_HEIGHT, computeDiagramHeightFromLayout(signalRows));
     const height = baseHeight;
     const guideHeight = Math.min(height, Math.max(0, height + (guideExtraHeight || 0)));
 
@@ -461,31 +529,40 @@ const Diagram = ({
 
     const edgeTimeCtx = useMemo(() => ({ oscillators, duration }), [oscillators, duration]);
 
-    const renderOscillator = (osc, index) => {
-        const yBase = index * spacing + SIGNAL_ROW_BASE_Y;
-        const waveHeight = OSC_WAVE_HEIGHT;
-        const halfPeriod = (osc.period || 100) / 2;
+    const renderOscillator = (osc) => {
+        const row = signalLayoutById.get(osc.id);
+        if (!row) return null;
+        const yBase = row.bottom;
+        const waveHeight = row.height;
+        const halfPeriod = getSafeOscillatorPeriod(osc, duration) / 2;
         const delay = osc.delay || 0;
         const edgeLimit = osc.edgeCount ?? -1;
         const maxEdgeIndex = edgeLimit >= 0 ? edgeLimit - 1 : Infinity;
-        let waveElements = [];
-        let edgeElements = [];
+        const waveElements = [];
+        const edgeElements = [];
 
         const startK = delay < 0 ? Math.ceil(-delay / halfPeriod) : 0;
         const endKByDuration = Math.floor((duration - delay) / halfPeriod);
         const endK = Math.min(endKByDuration, maxEdgeIndex);
 
         const tFirst = delay + startK * halfPeriod;
-        const levelAtZero = getOscillatorLevelAt(osc, 0);
+        const levelAtZero = getOscillatorLevelAt(osc, 0, duration);
         const yAtZero = levelAtZero === 1 ? yBase - waveHeight : yBase;
         const drawUntil = startK > endK ? duration : Math.min(tFirst, duration);
         if (drawUntil > 0) {
             const xEnd = Math.min(labelColumnWidth + drawUntil * timeScale, labelColumnWidth + duration * timeScale);
-
             waveElements.push(
-                <line key={`${osc.id}-init`}
-                    x1={labelColumnWidth} y1={yAtZero} x2={xEnd} y2={yAtZero}
-                    stroke={osc.color || "#000"} strokeWidth={lineWidth} strokeLinecap="square" pointerEvents="none" />
+                <line
+                    key={`${osc.id}-init`}
+                    x1={labelColumnWidth}
+                    y1={yAtZero}
+                    x2={xEnd}
+                    y2={yAtZero}
+                    stroke={osc.color || '#000'}
+                    strokeWidth={lineWidth}
+                    strokeLinecap="square"
+                    pointerEvents="none"
+                />
             );
         }
 
@@ -498,17 +575,25 @@ const Diagram = ({
             const isLastEdgeByCount = edgeLimit >= 0 && k === maxEdgeIndex;
             const tEnd = Math.min(isLastEdgeByCount ? duration : nextT, duration);
 
-            let baseLevel = (k % 2 === 0) ? 1 : 0;
-            let level = osc.inverted ? (1 - baseLevel) : baseLevel;
+            const baseLevel = (k % 2 === 0) ? 1 : 0;
+            const level = osc.inverted ? (1 - baseLevel) : baseLevel;
 
             const y = level === 1 ? yBase - waveHeight : yBase;
             const xStart = labelColumnWidth + tToken * timeScale;
             const xEnd = labelColumnWidth + tEnd * timeScale;
 
             waveElements.push(
-                <line key={`${osc.id}-h-${k}`}
-                    x1={xStart} y1={y} x2={xEnd} y2={y}
-                    stroke={osc.color || "#000"} strokeWidth={lineWidth} strokeLinecap="square" pointerEvents="none" />
+                <line
+                    key={`${osc.id}-h-${k}`}
+                    x1={xStart}
+                    y1={y}
+                    x2={xEnd}
+                    y2={y}
+                    stroke={osc.color || '#000'}
+                    strokeWidth={lineWidth}
+                    strokeLinecap="square"
+                    pointerEvents="none"
+                />
             );
 
             const y1 = level === 1 ? yBase : yBase - waveHeight;
@@ -521,15 +606,27 @@ const Diagram = ({
             const isSelected = selection?.type === 'edge' && selection?.ids?.includes(edgeId);
 
             waveElements.push(
-                <line key={`${osc.id}-v-${k}`}
-                    x1={xStart} y1={y1} x2={xStart} y2={y2}
-                    stroke={osc.color || "#000"} strokeWidth={isBold ? edgeWeight : lineWidth} pointerEvents="none" />
+                <line
+                    key={`${osc.id}-v-${k}`}
+                    x1={xStart}
+                    y1={y1}
+                    x2={xStart}
+                    y2={y2}
+                    stroke={osc.color || '#000'}
+                    strokeWidth={isBold ? edgeWeight : lineWidth}
+                    pointerEvents="none"
+                />
             );
 
             edgeElements.push(
-                <line key={`hit-${edgeId}`}
-                    x1={xStart} y1={yBase} x2={xStart} y2={yBase - waveHeight}
-                    stroke="transparent" strokeWidth={14}
+                <line
+                    key={`hit-${edgeId}`}
+                    x1={xStart}
+                    y1={yBase}
+                    x2={xStart}
+                    y2={yBase - waveHeight}
+                    stroke="transparent"
+                    strokeWidth={14}
                     pointerEvents={canInteractWithElement('edge') ? 'stroke' : 'none'}
                     style={{ cursor: getCursorForEdge(isBold) }}
                     onClick={(e) => {
@@ -539,15 +636,20 @@ const Diagram = ({
                                 onElementClick('edge', { id: edgeId, weight: edgeWeight }, { multi: e.shiftKey || e.ctrlKey || e.metaKey });
                             }
                         } else {
-                            toggleBoldEdge(edgeId, { oscId: osc.id, edgeIndex: k, oscillatorId: osc.id, signalIndex: index });
+                            toggleBoldEdge(edgeId, { oscId: osc.id, edgeIndex: k, oscillatorId: osc.id, signalIndex: row.index });
                         }
-                    }} />
+                    }}
+                />
             );
 
             if (isSelected) {
                 waveElements.push(
-                    <line key={`sel-${edgeId}`}
-                        x1={xStart} y1={y1} x2={xStart} y2={y2}
+                    <line
+                        key={`sel-${edgeId}`}
+                        x1={xStart}
+                        y1={y1}
+                        x2={xStart}
+                        y2={y2}
                         stroke="#2563eb"
                         strokeWidth={(isBold ? edgeWeight : lineWidth) + 2}
                         opacity={0.6}
@@ -574,7 +676,7 @@ const Diagram = ({
             const halfWidth = arrowWidth / 2;
 
             const x = labelColumnWidth + tEdge * timeScale;
-            const yCenter = yBase - waveHeight / 2;
+            const yCenter = row.mid;
             const tipY = yCenter + direction * halfLength;
             const baseY = yCenter - direction * halfLength;
             const leftX = x - halfWidth;
@@ -640,19 +742,38 @@ const Diagram = ({
                         if (!label || !String(label).trim().length) return null;
                         const sizeLabel = Math.max(6, arrow.arrowLabel?.size ?? fontSize ?? 10);
                         const pos = arrow.arrowLabel?.position || 'above';
-                        const dy = pos === 'below' ? (sizeLabel + 6) : -(sizeLabel + 6);
+                        const isCenter = pos === 'center';
+                        const dy = pos === 'below' ? (sizeLabel + 6) : pos === 'above' ? -(sizeLabel + 6) : 0;
+                        const textValue = String(label);
+                        const padX = 6;
+                        const padY = 3;
+                        const labelW = textValue.length * sizeLabel * 0.62 + padX * 2;
+                        const labelH = sizeLabel + padY * 2;
+                        const textY = yCenter + dy;
                         return (
-                            <text
-                                x={x}
-                                y={yCenter + dy}
-                                fontSize={sizeLabel}
-                                fontFamily={fontFamily}
-                                fill={arrowColor}
-                                textAnchor="middle"
-                                pointerEvents="none"
-                            >
-                                {String(label)}
-                            </text>
+                            <g pointerEvents="none">
+                                {isCenter && (
+                                    <rect
+                                        x={x - labelW / 2}
+                                        y={textY - sizeLabel * 0.82}
+                                        width={labelW}
+                                        height={labelH}
+                                        fill="#ffffff"
+                                        rx={3}
+                                        ry={3}
+                                    />
+                                )}
+                                <text
+                                    x={x}
+                                    y={textY}
+                                    fontSize={sizeLabel}
+                                    fontFamily={fontFamily}
+                                    fill={arrowColor}
+                                    textAnchor="middle"
+                                >
+                                    {textValue}
+                                </text>
+                            </g>
                         );
                     })()}
                 </g>
@@ -663,18 +784,19 @@ const Diagram = ({
         const hatchVisualElements = [];
         const hatchHitElements = [];
         oscillatorZones.forEach((z) => {
-            const oStart = oscillators.find(o => o.id === z.start.oscId);
-            const oEnd = oscillators.find(o => o.id === z.end.oscId);
+            const oStart = oscillators.find((o) => o.id === z.start.oscId);
+            const oEnd = oscillators.find((o) => o.id === z.end.oscId);
             if (!oStart || !oEnd) return;
 
-            const tStart = (oStart.delay || 0) + z.start.edgeIndex * ((oStart.period || 100) / 2);
-            const tEnd = (oEnd.delay || 0) + z.end.edgeIndex * ((oEnd.period || 100) / 2);
+            const startHalfPeriod = getSafeOscillatorPeriod(oStart, duration) / 2;
+            const endHalfPeriod = getSafeOscillatorPeriod(oEnd, duration) / 2;
+            const tStart = (oStart.delay || 0) + z.start.edgeIndex * startHalfPeriod;
+            const tEnd = (oEnd.delay || 0) + z.end.edgeIndex * endHalfPeriod;
 
             const xMin = labelColumnWidth + Math.min(tStart, tEnd) * timeScale;
             const xMax = labelColumnWidth + Math.max(tStart, tEnd) * timeScale;
             const clipX1 = Math.max(labelColumnWidth, xMin);
             const clipX2 = Math.min(labelColumnWidth + duration * timeScale, xMax);
-
             if (clipX1 >= clipX2) return;
 
             const isSelected = selection?.type === 'zone' && selection?.ids?.includes(z.id);
@@ -686,17 +808,21 @@ const Diagram = ({
             hatchVisualElements.push(
                 <g key={`zone-visual-${z.id}`}>
                     <rect
-                        x={clipX1} y={yBase - waveHeight}
-                        width={clipX2 - clipX1} height={waveHeight}
+                        x={clipX1}
+                        y={yBase - waveHeight}
+                        width={clipX2 - clipX1}
+                        height={waveHeight}
                         fill={`url(#${patternId})`}
-                        stroke={z.color || (z.borderWidth > 0 ? "#000" : "none")}
+                        stroke={z.color || (z.borderWidth > 0 ? '#000' : 'none')}
                         strokeWidth={z.borderWidth !== undefined ? z.borderWidth : zoneBorderWidth}
                         pointerEvents="none"
                     />
                     {isSelected && (
                         <rect
-                            x={clipX1} y={yBase - waveHeight}
-                            width={clipX2 - clipX1} height={waveHeight}
+                            x={clipX1}
+                            y={yBase - waveHeight}
+                            width={clipX2 - clipX1}
+                            height={waveHeight}
                             fill="none"
                             stroke="#2563eb"
                             strokeWidth={2}
@@ -710,8 +836,10 @@ const Diagram = ({
             hatchHitElements.push(
                 <rect
                     key={`zone-hit-${z.id}`}
-                    x={clipX1} y={yBase - waveHeight}
-                    width={clipX2 - clipX1} height={waveHeight}
+                    x={clipX1}
+                    y={yBase - waveHeight}
+                    width={clipX2 - clipX1}
+                    height={waveHeight}
                     fill="#ffffff"
                     fillOpacity={0.001}
                     stroke="none"
@@ -732,12 +860,13 @@ const Diagram = ({
         return (
             <g key={osc.id}>
                 <text
-                    x={labelX} y={yBase + labelYOffset - 3}
+                    x={labelX}
+                    y={yBase + labelYOffset - 3}
                     fontSize={fontSize}
-                    fontWeight={boldLabels ? "bold" : "normal"}
+                    fontWeight={boldLabels ? 'bold' : 'normal'}
                     fontFamily={fontFamily}
                     fill="#000"
-                    textAnchor={labelJustify || "start"}
+                    textAnchor={labelJustify || 'start'}
                 >
                     {osc.name}
                 </text>
@@ -750,14 +879,16 @@ const Diagram = ({
         );
     };
 
-    const renderCounter = (cnt, index) => {
-        const yBase = index * spacing + SIGNAL_ROW_BASE_Y;
-        const boxHeight = COUNTER_BOX_HEIGHT;
+    const renderCounter = (cnt) => {
+        const row = signalLayoutById.get(cnt.id);
+        if (!row) return null;
+        const yBase = row.bottom;
+        const boxHeight = row.height;
 
-        const targetOsc = cnt.referenceOscId ? oscillators.find(o => o.id === cnt.referenceOscId) : oscillators[0];
+        const targetOsc = cnt.referenceOscId ? oscillators.find((o) => o.id === cnt.referenceOscId) : oscillators[0];
         if (!targetOsc) return null;
 
-        const halfPeriod = (targetOsc.period || 100) / 2;
+        const halfPeriod = getSafeOscillatorPeriod(targetOsc, duration) / 2;
         const delay = targetOsc.delay || 0;
         const polarity = cnt.polarity || 'rising';
         const startEdgeNum = cnt.startEdge || 1;
@@ -765,7 +896,7 @@ const Diagram = ({
         const edgeLimit = targetOsc.edgeCount ?? -1;
         const maxEdgeIndex = edgeLimit >= 0 ? edgeLimit - 1 : Infinity;
 
-        let allValidEdges = [];
+        const allValidEdges = [];
         const maxK = Math.floor((duration - delay) / halfPeriod);
         const minK = Math.floor((-delay) / halfPeriod);
 
@@ -777,16 +908,12 @@ const Diagram = ({
             const isRefRising = (k % 2 === 0);
             const effectiveRising = targetOsc.inverted ? !isRefRising : isRefRising;
             const matches = (polarity === 'rising' && effectiveRising) || (polarity === 'falling' && !effectiveRising);
-
-            if (matches) {
-                allValidEdges.push(t);
-            }
+            if (matches) allValidEdges.push(t);
         }
 
         const segments = [];
         let currentCount = 0;
         let segmentStartT = 0;
-
         allValidEdges.forEach((tEdge, idx) => {
             const edgeNum = idx + 1;
             let nextCount = currentCount;
@@ -804,12 +931,13 @@ const Diagram = ({
         return (
             <g key={cnt.id}>
                 <text
-                    x={labelX} y={yBase + labelYOffset}
+                    x={labelX}
+                    y={yBase + labelYOffset}
                     fontSize={fontSize}
-                    fontWeight={boldLabels ? "bold" : "normal"}
+                    fontWeight={boldLabels ? 'bold' : 'normal'}
                     fontFamily={fontFamily}
                     fill="#000"
-                    textAnchor={labelJustify || "start"}
+                    textAnchor={labelJustify || 'start'}
                 >
                     {cnt.name}
                 </text>
@@ -818,16 +946,13 @@ const Diagram = ({
                     const x1 = labelColumnWidth + seg.t1 * timeScale;
                     const x2 = labelColumnWidth + seg.t2 * timeScale;
                     if (x1 >= x2) return null;
-
                     return (
                         <g key={sIdx}>
-                            <line x1={x1} y1={yBase - boxHeight} x2={x2} y2={yBase - boxHeight} stroke={cnt.color || "#000"} strokeWidth={lineWidth} />
-                            <line x1={x1} y1={yBase} x2={x2} y2={yBase} stroke={cnt.color || "#000"} strokeWidth={lineWidth} />
-
+                            <line x1={x1} y1={yBase - boxHeight} x2={x2} y2={yBase - boxHeight} stroke={cnt.color || '#000'} strokeWidth={lineWidth} />
+                            <line x1={x1} y1={yBase} x2={x2} y2={yBase} stroke={cnt.color || '#000'} strokeWidth={lineWidth} />
                             {seg.t1 > 0 && (
-                                <line x1={x1} y1={yBase} x2={x1} y2={yBase - boxHeight} stroke={cnt.color || "#000"} strokeWidth={lineWidth} />
+                                <line x1={x1} y1={yBase} x2={x1} y2={yBase - boxHeight} stroke={cnt.color || '#000'} strokeWidth={lineWidth} />
                             )}
-
                             <text
                                 x={(x1 + x2) / 2}
                                 y={yBase - boxHeight / 2}
@@ -835,7 +960,7 @@ const Diagram = ({
                                 textAnchor="middle"
                                 fontSize={counterFontSize || fontSize * 0.9}
                                 fontFamily={fontFamily}
-                                fill={cnt.color || "#000"}
+                                fill={cnt.color || '#000'}
                             >
                                 {seg.val}
                             </text>
@@ -851,7 +976,10 @@ const Diagram = ({
                     return (
                         <g key={edgeId}>
                             <line
-                                x1={x} y1={yBase} x2={x} y2={yBase - boxHeight}
+                                x1={x}
+                                y1={yBase}
+                                x2={x}
+                                y2={yBase - boxHeight}
                                 stroke="transparent"
                                 strokeWidth={14}
                                 pointerEvents={canInteractWithElement('edge') ? 'stroke' : 'none'}
@@ -863,13 +991,16 @@ const Diagram = ({
                                             onElementClick('edge', { id: edgeId, isBold }, { multi: e.shiftKey || e.ctrlKey || e.metaKey });
                                         }
                                     } else {
-                                        toggleBoldEdge(edgeId, { counterId: cnt.id, edgeIndex: idx + 1, signalIndex: index });
+                                        toggleBoldEdge(edgeId, { counterId: cnt.id, edgeIndex: idx + 1, signalIndex: row.index });
                                     }
                                 }}
                             />
                             {isSelected && (
                                 <line
-                                    x1={x} y1={yBase} x2={x} y2={yBase - boxHeight}
+                                    x1={x}
+                                    y1={yBase}
+                                    x2={x}
+                                    y2={yBase - boxHeight}
                                     stroke="#2563eb"
                                     strokeWidth={2}
                                     opacity={0.6}
@@ -1037,16 +1168,16 @@ const Diagram = ({
                 })}
             </defs>
 
-            {signals.map((signal, index) => (
+            {signals.map((signal) => (
                 signal.type === 'counter'
-                    ? renderCounter(signal, index)
-                    : renderOscillator(signal, index)
+                    ? renderCounter(signal)
+                    : renderOscillator(signal)
             ))}
 
             {renderLinkElements({
                 links: orderedLinks,
                 signals,
-                spacing,
+                signalLayoutById,
                 timeScale,
                 labelColumnWidth,
                 selection,
@@ -1069,7 +1200,7 @@ const Diagram = ({
             {renderGuideElements({
                 guides: orderedGuides,
                 signals,
-                spacing,
+                signalLayoutById,
                 duration,
                 timeScale,
                 labelColumnWidth,
@@ -1078,6 +1209,9 @@ const Diagram = ({
                 guideDashLength,
                 guideDashGap,
                 guideLineWidth,
+                guideUseRelativeExtents,
+                guideUpperExtension,
+                guideLowerExtension,
                 selection,
                 creationMode,
                 canInteractWithElement,
@@ -1110,6 +1244,8 @@ const Diagram = ({
                         y={legendBox.y}
                         width={legendBox.width}
                         height={legendBox.height}
+                        rx={Math.max(0, legend?.layout?.cornerRadius || 0)}
+                        ry={Math.max(0, legend?.layout?.cornerRadius || 0)}
                         fill="#ffffff"
                         opacity={0.95}
                         stroke={legend?.layout?.border ? '#0f172a' : 'none'}

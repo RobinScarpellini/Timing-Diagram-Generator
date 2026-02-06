@@ -17,9 +17,10 @@ import {
     reorderSignals as reorderSignalsAction,
     updateSignal as updateSignalAction
 } from './state/actions';
-import { DIAGRAM_HEIGHT_OFFSET, DIAGRAM_LABEL_COLUMN_WIDTH, DIAGRAM_MIN_HEIGHT, DIAGRAM_PADDING } from './constants/layout';
+import { DIAGRAM_LABEL_COLUMN_WIDTH, DIAGRAM_PADDING } from './constants/layout';
 import { HISTORY_LIMIT, PANELS, ZOOM } from './constants/ui';
 import { estimateLegendSize, resolveLegendPosition } from './diagram/legend';
+import { computeDiagramHeightFromLayout, computeSignalLayout, makeSignalLayoutMap } from './diagram/signalLayout';
 
 const generateId = () => Math.random().toString(36).slice(2, 11);
 
@@ -84,6 +85,25 @@ function App() {
         return map;
     }, [state.boldEdges]);
     const oscillatorsOnly = useMemo(() => state.signals.filter((sig) => sig.type === 'oscillator'), [state.signals]);
+    const signalLayoutSettings = useMemo(() => ({
+        spacing: state.settings.spacing,
+        signalSpacingMode: state.settings.signalSpacingMode,
+        oscWaveHeight: state.settings.oscWaveHeight,
+        counterWaveHeight: state.settings.counterWaveHeight
+    }), [
+        state.settings.spacing,
+        state.settings.signalSpacingMode,
+        state.settings.oscWaveHeight,
+        state.settings.counterWaveHeight
+    ]);
+    const signalLayoutRows = useMemo(
+        () => computeSignalLayout(state.signals, signalLayoutSettings),
+        [state.signals, signalLayoutSettings]
+    );
+    const signalLayoutById = useMemo(
+        () => makeSignalLayoutMap(signalLayoutRows),
+        [signalLayoutRows]
+    );
 
     const applyState = useCallback((nextState) => {
         stateRef.current = nextState;
@@ -169,6 +189,15 @@ function App() {
         e.preventDefault();
         const direction = e.deltaY > 0 ? -1 : 1;
         const next = parseFloat((value + direction * step).toFixed(6));
+        const minByKey = {
+            duration: 2,
+            lineWidth: 2,
+            fontSize: 2,
+            counterFontSize: 2,
+            oscWaveHeight: 2,
+            counterWaveHeight: 2
+        };
+        if (minByKey[key] !== undefined && next < minByKey[key]) return;
         if (!allowNegative && next < 0) return;
         updateSettings({ [key]: next });
     };
@@ -177,6 +206,11 @@ function App() {
         e.preventDefault();
         const direction = e.deltaY > 0 ? -1 : 1;
         const next = parseFloat((value + direction * step).toFixed(6));
+        if (key === 'period') {
+            const duration = stateRef.current?.settings?.duration || 0;
+            const minPeriod = Math.max(2, duration / 1000);
+            if (next < minPeriod) return;
+        }
         if (!allowNegative && next < 0) return;
         updateSignalValue(id, key, next);
     };
@@ -340,6 +374,21 @@ function App() {
         }
     };
 
+    const resolveMeasurementY = useCallback((endpoint) => {
+        if (endpoint?.kind === 'edge' && endpoint?.oscId) {
+            const row = signalLayoutById.get(endpoint.oscId);
+            if (row) return row.mid;
+        }
+        if (state.signals.length) {
+            const firstId = state.signals[0].id;
+            const firstRow = signalLayoutById.get(firstId);
+            if (firstRow) {
+                return Math.max(6, firstRow.top - 8);
+            }
+        }
+        return 24;
+    }, [signalLayoutById, state.signals]);
+
     const handleMeasurementEndpoint = useCallback((endpoint) => {
         if (!endpoint) return;
         if (creationMode === 'measure-start') {
@@ -356,7 +405,8 @@ function App() {
                 end: endpoint,
                 color: '#000000',
                 lineWidth: 1.2,
-                arrowSize: state.settings.arrowSize
+                arrowSize: state.settings.arrowSize,
+                y: resolveMeasurementY(endpoint)
             };
             setStateAndHistory({
                 ...state,
@@ -369,7 +419,7 @@ function App() {
             setMeasurementStart(null);
             setCreationMode('measure-start');
         }
-    }, [creationMode, measurementStart, state, setStateAndHistory]);
+    }, [creationMode, measurementStart, resolveMeasurementY, state, setStateAndHistory]);
 
     const toggleBoldEdge = (edgeId, pointInfo) => {
         if (creationMode && creationMode.startsWith('measure')) {
@@ -810,7 +860,7 @@ function App() {
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `${baseName || 'timing-diagram'}.json`;
+        link.download = `${baseName || 'timing-diagram'}_settings.json`;
         link.click();
         setTimeout(() => URL.revokeObjectURL(url), 0);
     };
@@ -837,9 +887,18 @@ function App() {
     const clampZoom = (nextZoom) => Math.min(ZOOM.MAX, Math.max(ZOOM.MIN, nextZoom));
     const zoomIn = () => setCanvasZoom((prev) => clampZoom(parseFloat((prev + ZOOM.STEP).toFixed(3))));
     const zoomOut = () => setCanvasZoom((prev) => clampZoom(parseFloat((prev - ZOOM.STEP).toFixed(3))));
+    const handleCanvasWheel = (event) => {
+        if (!(event.ctrlKey || event.metaKey)) return;
+        event.preventDefault();
+        const direction = event.deltaY < 0 ? 1 : -1;
+        const intensity = Math.min(3, Math.max(1, Math.abs(event.deltaY) / 120));
+        const step = ZOOM.STEP * intensity;
+        setCanvasZoom((prev) => clampZoom(parseFloat((prev + direction * step).toFixed(3))));
+    };
+
     const bounds = useMemo(() => {
         const baseWidth = state.settings.duration * state.settings.timeScale + DIAGRAM_LABEL_COLUMN_WIDTH + DIAGRAM_PADDING;
-        const baseHeight = Math.max(DIAGRAM_MIN_HEIGHT, (state.signals.length - 1) * state.settings.spacing + DIAGRAM_HEIGHT_OFFSET);
+        const baseHeight = computeDiagramHeightFromLayout(signalLayoutRows);
         const extraLeftLabel = Math.max(0, -(state.settings.labelX || 0));
 
         let viewBoxX = -extraLeftLabel;
@@ -880,7 +939,7 @@ function App() {
         }
 
         return { width, height, viewBoxX, viewBoxY, legendBox };
-    }, [state.settings.duration, state.settings.timeScale, state.settings.labelX, state.settings.spacing, state.settings.fontSize, state.signals.length, state.legend]);
+    }, [state.settings.duration, state.settings.timeScale, state.settings.labelX, state.settings.fontSize, state.legend, signalLayoutRows]);
 
     const diagramWidth = bounds.width;
     const diagramHeight = bounds.height;
@@ -891,14 +950,14 @@ function App() {
         const style = window.getComputedStyle(stage);
         const paddingX = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
         const paddingY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
-        const safety = 8;
+        const safety = 24;
         const availableWidth = Math.max(0, stage.clientWidth - paddingX - safety);
         const availableHeight = Math.max(0, stage.clientHeight - paddingY - safety);
         if (!availableWidth || !availableHeight) return;
 
         const fitZoom = availableWidth / diagramWidth;
         const fitHeightZoom = availableHeight / diagramHeight;
-        const nextZoom = clampZoom(parseFloat(Math.min(fitZoom, fitHeightZoom).toFixed(3)));
+        const nextZoom = clampZoom(parseFloat((Math.min(fitZoom, fitHeightZoom) * 0.995).toFixed(3)));
         setCanvasZoom(nextZoom);
     };
 
@@ -1005,7 +1064,7 @@ function App() {
                             canPaste={canPaste}
                         />
                     </div>
-                    <div ref={canvasStageRef} className="canvas-stage" onClick={() => setSelection(null)}>
+                    <div ref={canvasStageRef} className="canvas-stage" onClick={() => setSelection(null)} onWheel={handleCanvasWheel}>
                         <div className="canvas-stage-inner">
                             <div className="diagram-zoom-shell" style={{ width: diagramWidth * canvasZoom, height: diagramHeight * canvasZoom }}>
                                 <div className="diagram-zoom-inner" style={{ transform: `scale(${canvasZoom})` }}>
@@ -1058,6 +1117,12 @@ function App() {
                                             guideDashLength={state.settings.guideDashLength}
                                             guideDashGap={state.settings.guideDashGap}
                                             guideExtraHeight={state.settings.guideExtraHeight}
+                                            guideUseRelativeExtents={state.settings.guideUseRelativeExtents}
+                                            guideUpperExtension={state.settings.guideUpperExtension}
+                                            guideLowerExtension={state.settings.guideLowerExtension}
+                                            oscWaveHeight={state.settings.oscWaveHeight}
+                                            counterWaveHeight={state.settings.counterWaveHeight}
+                                            signalSpacingMode={state.settings.signalSpacingMode}
                                             zoneBorderWidth={state.settings.zoneBorderWidth}
                                             zonePatternWidth={state.settings.zonePatternWidth}
                                             hatchType={state.settings.hatchType}
@@ -1073,8 +1138,8 @@ function App() {
                         </div>
                     </div>
                     <div className="canvas-zoom-controls">
-                        <button className="canvas-zoom-btn" onClick={zoomIn} aria-label="Zoom in">+</button>
-                        <button className="canvas-zoom-btn" onClick={zoomOut} aria-label="Zoom out">−</button>
+                        <button className="canvas-zoom-btn" onClick={zoomIn} aria-label="Zoom in" title="Zoom in">+</button>
+                        <button className="canvas-zoom-btn" onClick={zoomOut} aria-label="Zoom out" title="Zoom out">−</button>
                         <button className="canvas-zoom-btn canvas-zoom-fit-btn" onClick={zoomToFit} aria-label="Zoom to fit" title="Zoom to fit">
                             <IconZoomFit />
                         </button>
