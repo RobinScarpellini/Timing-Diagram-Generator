@@ -885,6 +885,21 @@ function App() {
     };
 
     const clampZoom = (nextZoom) => Math.min(ZOOM.MAX, Math.max(ZOOM.MIN, nextZoom));
+    const centerCanvasStage = useCallback(() => {
+        const stage = canvasStageRef.current;
+        if (!stage) return;
+        const maxScrollLeft = Math.max(0, stage.scrollWidth - stage.clientWidth);
+        const maxScrollTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
+        stage.scrollLeft = maxScrollLeft / 2;
+        stage.scrollTop = maxScrollTop / 2;
+    }, []);
+    const scheduleCenterCanvasStage = useCallback(() => {
+        window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => {
+                centerCanvasStage();
+            });
+        });
+    }, [centerCanvasStage]);
     const zoomIn = () => setCanvasZoom((prev) => clampZoom(parseFloat((prev + ZOOM.STEP).toFixed(3))));
     const zoomOut = () => setCanvasZoom((prev) => clampZoom(parseFloat((prev - ZOOM.STEP).toFixed(3))));
     const handleCanvasWheel = (event) => {
@@ -959,6 +974,7 @@ function App() {
         const fitHeightZoom = availableHeight / diagramHeight;
         const nextZoom = clampZoom(parseFloat((Math.min(fitZoom, fitHeightZoom) * 0.995).toFixed(3)));
         setCanvasZoom(nextZoom);
+        scheduleCenterCanvasStage();
     };
 
     const startSideResize = (side) => (event) => {
