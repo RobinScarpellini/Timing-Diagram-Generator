@@ -73,6 +73,16 @@ export const normalizeState = (raw) => {
     state.settings.counterFontSize = Math.max(2, Number(state.settings.counterFontSize) || 2);
     state.settings.oscWaveHeight = Math.max(2, Number(state.settings.oscWaveHeight) || 2);
     state.settings.counterWaveHeight = Math.max(2, Number(state.settings.counterWaveHeight) || 2);
+    state.settings.measurementLineWidth = Math.max(0.1, Number(state.settings.measurementLineWidth) || 0.1);
+    state.settings.measurementArrowSize = Math.max(1, Number(state.settings.measurementArrowSize) || 1);
+    state.settings.measurementLabelSize = Math.max(1, Number(state.settings.measurementLabelSize) || 1);
+
+    state.measurements = state.measurements.map((m) => ({
+        ...m,
+        color: m.color ?? state.settings.measurementColor ?? '#000000',
+        lineWidth: m.lineWidth ?? state.settings.measurementLineWidth ?? 1.2,
+        arrowSize: m.arrowSize ?? state.settings.measurementArrowSize ?? state.settings.arrowSize ?? 10
+    }));
 
     const minPeriod = Math.max(2, state.settings.duration / 1000);
     state.signals = state.signals.map((signal) => {

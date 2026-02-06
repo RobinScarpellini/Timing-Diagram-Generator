@@ -41,24 +41,31 @@ export const computeSignalLayout = (signals = [], settings = {}) => {
 
     signals.forEach((signal, index) => {
         const height = getSignalVisualHeight(signal, settings);
+        let top;
         let bottom;
+        let mid;
 
         if (index === 0) {
-            bottom = SIGNAL_ROW_BASE_Y;
+            mid = SIGNAL_ROW_BASE_Y;
+            top = mid - height / 2;
+            bottom = mid + height / 2;
         } else if (spacingMode === 'gap') {
-            bottom = rows[index - 1].bottom + spacing + height;
+            top = rows[index - 1].bottom + spacing;
+            bottom = top + height;
+            mid = top + height / 2;
         } else {
-            bottom = SIGNAL_ROW_BASE_Y + index * spacing;
+            mid = SIGNAL_ROW_BASE_Y + index * spacing;
+            top = mid - height / 2;
+            bottom = mid + height / 2;
         }
 
-        const top = bottom - height;
         rows.push({
             id: signal.id,
             index,
             signal,
             top,
             bottom,
-            mid: top + height / 2,
+            mid,
             height
         });
     });

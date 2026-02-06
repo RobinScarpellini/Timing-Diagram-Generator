@@ -77,13 +77,13 @@ const RightSidebarSelectionPanel = ({
     }
 
     if (selection.type === 'measurement' && selectedMeasurement) {
-        const lineWidthState = getMixed(selectedMeasurements, (m) => m.lineWidth ?? 1.2);
-        const colorState = getMixed(selectedMeasurements, (m) => m.color ?? '#000000');
-        const arrowSizeState = getMixed(selectedMeasurements, (m) => m.arrowSize ?? settings.arrowSize);
+        const lineWidthState = getMixed(selectedMeasurements, (m) => m.lineWidth ?? settings.measurementLineWidth ?? 1.2);
+        const colorState = getMixed(selectedMeasurements, (m) => m.color ?? settings.measurementColor ?? '#000000');
+        const arrowSizeState = getMixed(selectedMeasurements, (m) => m.arrowSize ?? settings.measurementArrowSize ?? settings.arrowSize);
         const yState = getMixed(selectedMeasurements, (m) => Number.isFinite(m.y) ? m.y : 24);
-        const labelTextState = getMixed(selectedMeasurements, (m) => m.arrowLabel?.text ?? '');
-        const labelSizeState = getMixed(selectedMeasurements, (m) => m.arrowLabel?.size ?? settings.fontSize);
-        const labelPosState = getMixed(selectedMeasurements, (m) => m.arrowLabel?.position ?? 'top');
+        const labelTextState = getMixed(selectedMeasurements, (m) => m.arrowLabel?.text ?? (settings.measurementLabelText ?? ''));
+        const labelSizeState = getMixed(selectedMeasurements, (m) => m.arrowLabel?.size ?? (settings.measurementLabelSize ?? settings.fontSize));
+        const labelPosState = getMixed(selectedMeasurements, (m) => m.arrowLabel?.position ?? (settings.measurementLabelPosition ?? 'top'));
 
         return (
             <>

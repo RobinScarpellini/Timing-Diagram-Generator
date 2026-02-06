@@ -11,6 +11,7 @@ import { normalizeState } from './state/migrate';
 import {
     addCounter as addCounterAction,
     addOscillator as addOscillatorAction,
+    normalizeCounterRanges,
     patchItemsByIds,
     removeItemsByIds,
     removeSignalAndDependencies,
@@ -172,13 +173,19 @@ function App() {
     };
 
     const updateSettings = useCallback((patch) => {
-        setStateAndHistory((current) => ({
-            ...current,
-            settings: {
-                ...current.settings,
-                ...patch
+        setStateAndHistory((current) => {
+            const next = {
+                ...current,
+                settings: {
+                    ...current.settings,
+                    ...patch
+                }
+            };
+            if (patch.duration !== undefined) {
+                return normalizeCounterRanges(next);
             }
-        }));
+            return next;
+        });
     }, [setStateAndHistory]);
 
     const updateDiagramName = useCallback((name) => {
@@ -403,9 +410,16 @@ function App() {
                 id: newId,
                 start: measurementStart,
                 end: endpoint,
-                color: '#000000',
-                lineWidth: 1.2,
-                arrowSize: state.settings.arrowSize,
+                color: state.settings.measurementColor || '#000000',
+                lineWidth: state.settings.measurementLineWidth ?? 1.2,
+                arrowSize: state.settings.measurementArrowSize ?? state.settings.arrowSize,
+                ...(String(state.settings.measurementLabelText || '').trim().length ? {
+                    arrowLabel: {
+                        text: state.settings.measurementLabelText,
+                        size: state.settings.measurementLabelSize ?? state.settings.fontSize,
+                        position: state.settings.measurementLabelPosition || 'top'
+                    }
+                } : {}),
                 y: resolveMeasurementY(endpoint)
             };
             setStateAndHistory({
@@ -417,7 +431,8 @@ function App() {
                 }
             });
             setMeasurementStart(null);
-            setCreationMode('measure-start');
+            setCreationMode(null);
+            setSelection({ type: 'measurement', ids: [newId] });
         }
     }, [creationMode, measurementStart, resolveMeasurementY, state, setStateAndHistory]);
 
@@ -797,6 +812,38 @@ function App() {
     const canPaste = Boolean(styleClipboard);
     const clipboardType = styleClipboard?.type ?? null;
 
+    const deleteSelection = useCallback(() => {
+        if (!selection?.ids?.length) return;
+        const ids = selection.ids;
+        const idSet = new Set(ids);
+        if (selection.type === 'guide') {
+            setStateAndHistory((current) => {
+                let next = removeItemsByIds(current, 'guides', ids);
+                const relatedMeasurementIds = (next.measurements || [])
+                    .filter((m) => (
+                        (m?.start?.kind === 'guide' && idSet.has(m.start.guideId)) ||
+                        (m?.end?.kind === 'guide' && idSet.has(m.end.guideId))
+                    ))
+                    .map((m) => m.id);
+                if (relatedMeasurementIds.length) {
+                    next = removeItemsByIds(next, 'measurements', relatedMeasurementIds);
+                }
+                return next;
+            });
+        } else if (selection.type === 'zone') {
+            setStateAndHistory((current) => removeItemsByIds(current, 'zones', ids));
+        } else if (selection.type === 'link') {
+            setStateAndHistory((current) => removeItemsByIds(current, 'links', ids));
+        } else if (selection.type === 'edge-arrow') {
+            setStateAndHistory((current) => removeItemsByIds(current, 'edgeArrows', ids));
+        } else if (selection.type === 'measurement') {
+            setStateAndHistory((current) => removeItemsByIds(current, 'measurements', ids));
+        } else if (selection.type === 'edge') {
+            setStateAndHistory((current) => removeItemsByIds(current, 'boldEdges', ids));
+        }
+        setSelection(null);
+    }, [selection, setStateAndHistory]);
+
     const sanitizeFileBaseName = (rawName) => {
         const source = (String(rawName || '').trim() || 'timing-diagram');
         const cleaned = source
@@ -814,9 +861,16 @@ function App() {
             const key = event.key.toLowerCase();
             const isMac = navigator.platform.toUpperCase().includes('MAC');
             const hasModifier = isMac ? event.metaKey : event.ctrlKey;
-            if (!hasModifier) return;
             const tagName = event.target?.tagName;
             if (tagName && ['INPUT', 'TEXTAREA', 'SELECT'].includes(tagName)) return;
+            if (event.target?.isContentEditable) return;
+            if (key === 'delete' || key === 'backspace') {
+                if (!selection?.ids?.length) return;
+                event.preventDefault();
+                deleteSelection();
+                return;
+            }
+            if (!hasModifier) return;
             if (key === 'c') {
                 event.preventDefault();
                 if (selection?.ids?.length) {
@@ -835,7 +889,7 @@ function App() {
         };
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);
-    }, [selection, styleClipboard, copyFromSelection, pasteToSelection]);
+    }, [selection, styleClipboard, copyFromSelection, pasteToSelection, deleteSelection]);
 
     const downloadSVG = () => {
         const svgElement = document.querySelector('.diagram-canvas svg');
@@ -905,8 +959,8 @@ function App() {
             const step = ZOOM.STEP * intensity;
             setCanvasZoom((prev) => clampZoom(parseFloat((prev + direction * step).toFixed(3))));
         };
-        stage.addEventListener('wheel', onWheel, { passive: false });
-        return () => stage.removeEventListener('wheel', onWheel);
+        stage.addEventListener('wheel', onWheel, { passive: false, capture: true });
+        return () => stage.removeEventListener('wheel', onWheel, true);
     }, []);
 
     const bounds = useMemo(() => {
@@ -918,6 +972,15 @@ function App() {
         let viewBoxY = 0;
         let width = baseWidth + extraLeftLabel;
         let height = baseHeight;
+
+        const minSignalTop = signalLayoutRows.length
+            ? Math.min(...signalLayoutRows.map((row) => row.top))
+            : 0;
+        if (minSignalTop < viewBoxY) {
+            const extraTop = viewBoxY - minSignalTop;
+            viewBoxY = minSignalTop;
+            height += extraTop;
+        }
 
         const legendSize = estimateLegendSize(state.legend, { fontSize: state.settings.fontSize });
         let legendBox = null;

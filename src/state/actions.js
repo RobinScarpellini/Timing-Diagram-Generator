@@ -3,13 +3,65 @@ const generateSignalName = (signals, type, prefix) => {
     return `${prefix} ${count + 1}`;
 };
 
+const getSafeOscillatorPeriod = (period, duration) => {
+    const minPeriod = Math.max(2, (duration || 0) / 1000);
+    const parsed = Number(period);
+    const base = Number.isFinite(parsed) && parsed > 0 ? parsed : 100;
+    return Math.max(minPeriod, base);
+};
+
+const getVisibleCounterEdgeCount = (state, counter) => {
+    const duration = state.settings?.duration || 0;
+    const oscillators = state.signals.filter((s) => s.type === 'oscillator');
+    const ref = oscillators.find((o) => o.id === counter.referenceOscId) || oscillators[0];
+    if (!ref) return 1;
+
+    const halfPeriod = getSafeOscillatorPeriod(ref.period, duration) / 2;
+    const delay = ref.delay || 0;
+    const polarity = counter.polarity || 'rising';
+    const edgeLimit = ref.edgeCount ?? -1;
+    const maxEdgeIndex = edgeLimit >= 0 ? edgeLimit - 1 : Infinity;
+
+    let count = 0;
+    const maxK = Math.floor((duration - delay) / halfPeriod);
+    const minK = Math.floor((-delay) / halfPeriod);
+    for (let k = minK; k <= maxK; k++) {
+        if (k >= 0 && k > maxEdgeIndex) break;
+        const t = delay + k * halfPeriod;
+        if (t < 0 || t > duration) continue;
+        const isRefRising = (k % 2 === 0);
+        const effectiveRising = ref.inverted ? !isRefRising : isRefRising;
+        const matches = (polarity === 'rising' && effectiveRising) || (polarity === 'falling' && !effectiveRising);
+        if (matches) count++;
+    }
+    return Math.max(1, count);
+};
+
+const clampCounterRange = (state, counter) => {
+    const visible = getVisibleCounterEdgeCount(state, counter);
+    let startEdge = Math.max(1, parseInt(counter.startEdge, 10) || 1);
+    let endEdge = Math.max(1, parseInt(counter.endEdge, 10) || 1);
+    startEdge = Math.min(startEdge, visible);
+    endEdge = Math.min(endEdge, visible);
+    if (startEdge > endEdge) {
+        endEdge = startEdge;
+    }
+    return { ...counter, startEdge, endEdge };
+};
+
+export const normalizeCounterRanges = (state) => ({
+    ...state,
+    signals: state.signals.map((sig) => (sig.type === 'counter' ? clampCounterRange(state, sig) : sig))
+});
+
 export const applySignalValue = (field, value) => {
     if (field === 'name' || field === 'inverted' || field === 'color' || field === 'type' || field === 'referenceOscId' || field === 'polarity') {
         return value;
     }
-    if (field === 'edgeCount') {
+    if (field === 'edgeCount' || field === 'startEdge' || field === 'endEdge') {
         const parsed = parseInt(value, 10);
-        return Number.isNaN(parsed) ? -1 : parsed;
+        if (field === 'edgeCount') return Number.isNaN(parsed) ? -1 : parsed;
+        return Number.isNaN(parsed) ? 1 : parsed;
     }
     const parsed = parseFloat(value);
     return Number.isNaN(parsed) ? null : parsed;
@@ -96,31 +148,36 @@ export const addCounter = (state, id) => {
             polarity: 'rising'
         }
     ];
-    return { ...state, signals: nextSignals };
+    return normalizeCounterRanges({ ...state, signals: nextSignals });
 };
 
 export const updateSignal = (state, { id, field, value }) => {
-    const nextSignals = state.signals.map((sig) => sig.id === id ? {
-        ...sig,
-        [field]: (() => {
-            let nextValue = applySignalValue(field, value);
-            if (nextValue === null) return sig[field];
-            if (field === 'edgeCount' && sig.type === 'oscillator') {
-                if (nextValue < -1) nextValue = -1;
-                if (nextValue >= 0) {
-                    const maxRef = getMaxReferencedEdgeIndex(state, sig.id);
-                    const minAllowed = maxRef + 1;
-                    if (nextValue < minAllowed) nextValue = minAllowed;
-                }
+    const nextSignals = state.signals.map((sig) => {
+        if (sig.id !== id) return sig;
+        let nextValue = applySignalValue(field, value);
+        if (nextValue === null) return sig;
+        if (field === 'edgeCount' && sig.type === 'oscillator') {
+            if (nextValue < -1) nextValue = -1;
+            if (nextValue >= 0) {
+                const maxRef = getMaxReferencedEdgeIndex(state, sig.id);
+                const minAllowed = maxRef + 1;
+                if (nextValue < minAllowed) nextValue = minAllowed;
             }
-            if (field === 'period' && sig.type === 'oscillator') {
-                const minPeriod = Math.max(2, (state.settings?.duration || 0) / 1000);
-                if (nextValue < minPeriod) nextValue = minPeriod;
-            }
-            return nextValue;
-        })()
-    } : sig);
-    return { ...state, signals: nextSignals };
+        }
+        if (field === 'period' && sig.type === 'oscillator') {
+            const minPeriod = Math.max(2, (state.settings?.duration || 0) / 1000);
+            if (nextValue < minPeriod) nextValue = minPeriod;
+        }
+        let nextSignal = {
+            ...sig,
+            [field]: nextValue
+        };
+        if (sig.type === 'counter') {
+            nextSignal = clampCounterRange(state, nextSignal);
+        }
+        return nextSignal;
+    });
+    return normalizeCounterRanges({ ...state, signals: nextSignals });
 };
 
 export const removeSignalAndDependencies = (state, id) => {

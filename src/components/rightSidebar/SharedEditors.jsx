@@ -160,7 +160,7 @@ export const GuideEditor = ({
                 <NumberField
                     label="Dash"
                     value={guideDashLengthState.value}
-                    disabled={guideStyle !== 'dashed'}
+                    disabled={guideStyle === 'solid'}
                     className={guideDashLengthState.mixed ? 'input-mixed' : ''}
                     onScroll={makeScroll(guideDashLengthState.value, 1, false, (next) => onGuideDashLengthChange(next))}
                     onChange={(e) => {
@@ -287,7 +287,7 @@ export const LinkEditor = ({
                 <NumberField
                     label="Dash"
                     value={linkDashLengthState.value}
-                    disabled={linkStyle !== 'dashed'}
+                    disabled={linkStyle === 'solid'}
                     className={linkDashLengthState.mixed ? 'input-mixed' : ''}
                     onScroll={makeScroll(linkDashLengthState.value, 1, false, (next) => onLinkDashLengthChange(next))}
                     onChange={(e) => {

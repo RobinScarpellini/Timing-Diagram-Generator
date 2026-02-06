@@ -1,5 +1,6 @@
 import React from 'react';
-import { NumberField } from '../InputFields';
+import { NumberField, SelectField, TextField } from '../InputFields';
+import { ColorPicker } from '../ColorPicker';
 import { ArrowEditor, GuideEditor, LinkEditor, ZoneEditor } from './SharedEditors';
 
 const RightSidebarToolPanel = ({
@@ -351,6 +352,66 @@ const RightSidebarToolPanel = ({
             <>
                 <div style={{ fontSize: '0.85rem', color: '#64748b', lineHeight: 1.4 }}>
                     Click two guides or oscillator edges to create a measurement.
+                </div>
+                <div className="grid-2">
+                    <NumberField
+                        label="Line Width"
+                        value={settings.measurementLineWidth ?? 1.2}
+                        step={0.1}
+                        onScroll={makeScroll(settings.measurementLineWidth ?? 1.2, 0.1, false, (next) => updateSettings({ measurementLineWidth: Math.max(0.1, next) }))}
+                        onChange={(e) => {
+                            const v = Math.max(0.1, parseFloat(e.target.value) || 0.1);
+                            updateSettings({ measurementLineWidth: v });
+                        }}
+                    />
+                    <NumberField
+                        label="Arrow Size"
+                        value={settings.measurementArrowSize ?? settings.arrowSize}
+                        step={0.5}
+                        onScroll={makeScroll(settings.measurementArrowSize ?? settings.arrowSize, 0.5, false, (next) => updateSettings({ measurementArrowSize: Math.max(1, next) }))}
+                        onChange={(e) => {
+                            const v = Math.max(1, parseFloat(e.target.value) || 1);
+                            updateSettings({ measurementArrowSize: v });
+                        }}
+                    />
+                </div>
+                <ColorPicker
+                    label="Color"
+                    color={settings.measurementColor ?? '#000000'}
+                    onChange={(c) => updateSettings({ measurementColor: c })}
+                    variant="compact"
+                />
+                <div className="settings-separator" />
+                <div className="tool-settings-block" style={{ marginTop: '12px' }}>
+                    <TextField
+                        label="Label"
+                        value={settings.measurementLabelText ?? ''}
+                        placeholder="(none)"
+                        onChange={(e) => updateSettings({ measurementLabelText: e.target.value })}
+                    />
+                    <div className="grid-2">
+                        <NumberField
+                            label="Label Size"
+                            value={settings.measurementLabelSize ?? settings.fontSize}
+                            step={1}
+                            disabled={!String(settings.measurementLabelText || '').trim().length}
+                            onScroll={makeScroll(settings.measurementLabelSize ?? settings.fontSize, 1, false, (next) => updateSettings({ measurementLabelSize: Math.max(1, next) }))}
+                            onChange={(e) => {
+                                const v = Math.max(1, parseFloat(e.target.value) || 1);
+                                updateSettings({ measurementLabelSize: v });
+                            }}
+                        />
+                        <SelectField
+                            label="Label Pos"
+                            value={settings.measurementLabelPosition || 'top'}
+                            onChange={(e) => updateSettings({ measurementLabelPosition: e.target.value })}
+                            options={[
+                                { value: 'top', label: 'Top' },
+                                { value: 'bottom', label: 'Bottom' },
+                                { value: 'center', label: 'Center' }
+                            ]}
+                        />
+                    </div>
                 </div>
                 {renderLayerControls('measurement')}
             </>

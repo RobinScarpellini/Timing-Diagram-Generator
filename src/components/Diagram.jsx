@@ -9,8 +9,10 @@ import { estimateLegendSize, resolveLegendPosition } from '../diagram/legend';
 import { computeDiagramHeightFromLayout, computeSignalLayout, makeSignalLayoutMap } from '../diagram/signalLayout';
 
 const getDashPatternValue = (style, len, gap) => {
-    if (style === 'dashed') return `${len},${gap}`;
-    if (style === 'dotted') return `1,${gap}`;
+    const safeLen = Math.max(0.1, Number(len) || 0.1);
+    const safeGap = Math.max(0.1, Number(gap) || 0.1);
+    if (style === 'dashed') return `${safeLen},${safeGap}`;
+    if (style === 'dotted') return `${safeLen},${safeGap}`;
     return '';
 };
 
@@ -30,6 +32,7 @@ const renderLinkElements = ({
     linkColor,
     arrowSize,
     defaultDash,
+    linkStyle,
     fontFamily,
     defaultLabelSize,
     deleteLink,
@@ -101,6 +104,7 @@ const renderLinkElements = ({
                     stroke={linkStrokeColor}
                     strokeWidth={link.lineWidth || linkLineWidth}
                     strokeDasharray={dash}
+                    strokeLinecap={(link.style || linkStyle || 'solid') === 'dotted' ? 'round' : 'butt'}
                     markerStart={(link.startMarker || linkStartMarker) === 'arrow' ? `url(#arrowhead-start-${markerId})` : (link.startMarker || linkStartMarker) === 'dot' ? `url(#dot-${markerId})` : 'none'}
                     markerEnd={(link.endMarker || linkEndMarker) === 'arrow' ? `url(#arrowhead-${markerId})` : (link.endMarker || linkEndMarker) === 'dot' ? `url(#dot-${markerId})` : 'none'}
                 />
@@ -237,6 +241,7 @@ const renderGuideElements = ({
                     stroke="#000"
                     strokeWidth={lineWidth}
                     strokeDasharray={dash}
+                    strokeLinecap={lineStyle === 'dotted' ? 'round' : 'butt'}
                     opacity="0.6"
                     pointerEvents="none"
                 />
@@ -861,12 +866,13 @@ const Diagram = ({
             <g key={osc.id}>
                 <text
                     x={labelX}
-                    y={yBase + labelYOffset - 3}
+                    y={row.mid + labelYOffset}
                     fontSize={fontSize}
                     fontWeight={boldLabels ? 'bold' : 'normal'}
                     fontFamily={fontFamily}
                     fill="#000"
                     textAnchor={labelJustify || 'start'}
+                    dominantBaseline="middle"
                 >
                     {osc.name}
                 </text>
@@ -932,12 +938,13 @@ const Diagram = ({
             <g key={cnt.id}>
                 <text
                     x={labelX}
-                    y={yBase + labelYOffset}
+                    y={row.mid + labelYOffset}
                     fontSize={fontSize}
                     fontWeight={boldLabels ? 'bold' : 'normal'}
                     fontFamily={fontFamily}
                     fill="#000"
                     textAnchor={labelJustify || 'start'}
+                    dominantBaseline="middle"
                 >
                     {cnt.name}
                 </text>
@@ -1190,6 +1197,7 @@ const Diagram = ({
                 linkColor,
                 arrowSize,
                 defaultDash: defaultLinkDash,
+                linkStyle,
                 fontFamily,
                 defaultLabelSize: fontSize,
                 deleteLink,
