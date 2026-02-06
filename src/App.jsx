@@ -885,31 +885,29 @@ function App() {
     };
 
     const clampZoom = (nextZoom) => Math.min(ZOOM.MAX, Math.max(ZOOM.MIN, nextZoom));
-    const centerCanvasStage = useCallback(() => {
+    const resetCanvasStageScroll = useCallback(() => {
         const stage = canvasStageRef.current;
         if (!stage) return;
-        const maxScrollLeft = Math.max(0, stage.scrollWidth - stage.clientWidth);
-        const maxScrollTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
-        stage.scrollLeft = maxScrollLeft / 2;
-        stage.scrollTop = maxScrollTop / 2;
+        stage.scrollLeft = 0;
+        stage.scrollTop = 0;
     }, []);
-    const scheduleCenterCanvasStage = useCallback(() => {
-        window.requestAnimationFrame(() => {
-            window.requestAnimationFrame(() => {
-                centerCanvasStage();
-            });
-        });
-    }, [centerCanvasStage]);
     const zoomIn = () => setCanvasZoom((prev) => clampZoom(parseFloat((prev + ZOOM.STEP).toFixed(3))));
     const zoomOut = () => setCanvasZoom((prev) => clampZoom(parseFloat((prev - ZOOM.STEP).toFixed(3))));
-    const handleCanvasWheel = (event) => {
-        if (!(event.ctrlKey || event.metaKey)) return;
-        event.preventDefault();
-        const direction = event.deltaY < 0 ? 1 : -1;
-        const intensity = Math.min(3, Math.max(1, Math.abs(event.deltaY) / 120));
-        const step = ZOOM.STEP * intensity;
-        setCanvasZoom((prev) => clampZoom(parseFloat((prev + direction * step).toFixed(3))));
-    };
+    useEffect(() => {
+        const stage = canvasStageRef.current;
+        if (!stage) return;
+        const onWheel = (event) => {
+            if (!(event.ctrlKey || event.metaKey)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const direction = event.deltaY < 0 ? 1 : -1;
+            const intensity = Math.min(3, Math.max(1, Math.abs(event.deltaY) / 120));
+            const step = ZOOM.STEP * intensity;
+            setCanvasZoom((prev) => clampZoom(parseFloat((prev + direction * step).toFixed(3))));
+        };
+        stage.addEventListener('wheel', onWheel, { passive: false });
+        return () => stage.removeEventListener('wheel', onWheel);
+    }, []);
 
     const bounds = useMemo(() => {
         const baseWidth = state.settings.duration * state.settings.timeScale + DIAGRAM_LABEL_COLUMN_WIDTH + DIAGRAM_PADDING;
@@ -972,9 +970,15 @@ function App() {
 
         const fitZoom = availableWidth / diagramWidth;
         const fitHeightZoom = availableHeight / diagramHeight;
-        const nextZoom = clampZoom(parseFloat((Math.min(fitZoom, fitHeightZoom) * 0.995).toFixed(3)));
+        const rawFit = Math.min(fitZoom, fitHeightZoom) * 0.99;
+        const flooredFit = Math.floor(rawFit * 1000) / 1000;
+        const nextZoom = clampZoom(flooredFit > 0 ? flooredFit : ZOOM.MIN);
         setCanvasZoom(nextZoom);
-        scheduleCenterCanvasStage();
+        window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => {
+                resetCanvasStageScroll();
+            });
+        });
     };
 
     const startSideResize = (side) => (event) => {
@@ -1080,7 +1084,7 @@ function App() {
                             canPaste={canPaste}
                         />
                     </div>
-                    <div ref={canvasStageRef} className="canvas-stage" onClick={() => setSelection(null)} onWheel={handleCanvasWheel}>
+                    <div ref={canvasStageRef} className="canvas-stage" onClick={() => setSelection(null)}>
                         <div className="canvas-stage-inner">
                             <div className="diagram-zoom-shell" style={{ width: diagramWidth * canvasZoom, height: diagramHeight * canvasZoom }}>
                                 <div className="diagram-zoom-inner" style={{ transform: `scale(${canvasZoom})` }}>
