@@ -95,7 +95,8 @@ export const ArrowEditor = ({
                     onChange={(e) => onLabelPosChange(e.target.value)}
                     options={[
                         { value: 'above', label: 'Above' },
-                        { value: 'below', label: 'Below' }
+                        { value: 'below', label: 'Below' },
+                        { value: 'center', label: 'Center' }
                     ]}
                 />
             </div>
@@ -379,7 +380,8 @@ export const LinkEditor = ({
                                 onChange={(e) => onLabelPosChange(e.target.value)}
                                 options={[
                                     { value: 'above', label: 'Above' },
-                                    { value: 'below', label: 'Below' }
+                                    { value: 'below', label: 'Below' },
+                                    { value: 'center', label: 'Center' }
                                 ]}
                             />
                         </div>

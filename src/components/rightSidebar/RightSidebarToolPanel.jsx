@@ -66,6 +66,40 @@ const RightSidebarToolPanel = ({
                     onGuideDashGapChange={(value) => applyGuideSetting({ guideDashGap: value })}
                 />
                 <NumberField label="Extra Height" value={settings.guideExtraHeight} step={5} onScroll={makeScroll(settings.guideExtraHeight, 5, true, (next) => applyGuideSetting({ guideExtraHeight: next }))} onChange={(e) => { const v = parseFloat(e.target.value) || 0; applyGuideSetting({ guideExtraHeight: v }); }} />
+                <div className="input-group" style={{ flexDirection: 'row', alignItems: 'center', gap: '8px', marginBottom: '8px', marginTop: '12px' }}>
+                    <input
+                        type="checkbox"
+                        id="guide-relative-extents"
+                        checked={Boolean(settings.guideUseRelativeExtents)}
+                        style={{ width: '16px', height: '16px' }}
+                        onChange={(e) => applyGuideSetting({ guideUseRelativeExtents: e.target.checked })}
+                    />
+                    <label htmlFor="guide-relative-extents" style={{ textTransform: 'none', marginTop: 0 }}>From Anchor Point</label>
+                </div>
+                <div className="grid-2">
+                    <NumberField
+                        label="Top Ext"
+                        value={settings.guideUpperExtension}
+                        step={5}
+                        disabled={!settings.guideUseRelativeExtents}
+                        onScroll={makeScroll(settings.guideUpperExtension, 5, false, (next) => applyGuideSetting({ guideUpperExtension: next }))}
+                        onChange={(e) => {
+                            const v = Math.max(0, parseFloat(e.target.value) || 0);
+                            applyGuideSetting({ guideUpperExtension: v });
+                        }}
+                    />
+                    <NumberField
+                        label="Bot Ext"
+                        value={settings.guideLowerExtension}
+                        step={5}
+                        disabled={!settings.guideUseRelativeExtents}
+                        onScroll={makeScroll(settings.guideLowerExtension, 5, false, (next) => applyGuideSetting({ guideLowerExtension: next }))}
+                        onChange={(e) => {
+                            const v = Math.max(0, parseFloat(e.target.value) || 0);
+                            applyGuideSetting({ guideLowerExtension: v });
+                        }}
+                    />
+                </div>
                 {renderLayerControls('guide')}
             </>
         );

@@ -80,6 +80,7 @@ const RightSidebarSelectionPanel = ({
         const lineWidthState = getMixed(selectedMeasurements, (m) => m.lineWidth ?? 1.2);
         const colorState = getMixed(selectedMeasurements, (m) => m.color ?? '#000000');
         const arrowSizeState = getMixed(selectedMeasurements, (m) => m.arrowSize ?? settings.arrowSize);
+        const yState = getMixed(selectedMeasurements, (m) => Number.isFinite(m.y) ? m.y : 24);
         const labelTextState = getMixed(selectedMeasurements, (m) => m.arrowLabel?.text ?? '');
         const labelSizeState = getMixed(selectedMeasurements, (m) => m.arrowLabel?.size ?? settings.fontSize);
         const labelPosState = getMixed(selectedMeasurements, (m) => m.arrowLabel?.position ?? 'top');
@@ -111,6 +112,18 @@ const RightSidebarSelectionPanel = ({
                             }}
                         />
                     </div>
+                    <NumberField
+                        label="Y Position"
+                        value={yState.value}
+                        step={1}
+                        className={yState.mixed ? 'input-mixed' : ''}
+                        onScroll={makeScroll(yState.value, 1, true, (next) => applyMeasurementPatch({ y: next }))}
+                        onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            if (!Number.isFinite(v)) return;
+                            applyMeasurementPatch({ y: v });
+                        }}
+                    />
                     <ColorPicker
                         label="Color"
                         color={colorState.value}
@@ -153,7 +166,8 @@ const RightSidebarSelectionPanel = ({
                                 onChange={(e) => applyMeasurementPatch({ arrowLabel: { text: labelTextState.value, size: labelSizeState.value, position: e.target.value } })}
                                 options={[
                                     { value: 'top', label: 'Top' },
-                                    { value: 'bottom', label: 'Bottom' }
+                                    { value: 'bottom', label: 'Bottom' },
+                                    { value: 'center', label: 'Center' }
                                 ]}
                             />
                         </div>

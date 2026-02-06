@@ -7,18 +7,34 @@ const RightSidebarGeneralSettings = ({
 }) => (
     <div className="right-sidebar-general-settings">
         <div className="grid-2">
-            <NumberField label="Plot Duration" value={settings.duration} step={10} onScroll={handleSettingScroll('duration', settings.duration, 10, false)} onChange={(e) => { const v = Math.max(0, parseFloat(e.target.value) || 0); updateSettings({ duration: v }); }} />
+            <NumberField label="Plot Duration" value={settings.duration} step={10} onScroll={handleSettingScroll('duration', settings.duration, 10, false)} onChange={(e) => { const v = Math.max(2, parseFloat(e.target.value) || 2); updateSettings({ duration: v }); }} />
             <NumberField label="Stretch Factor" value={settings.timeScale} step={0.001} onScroll={handleSettingScroll('timeScale', settings.timeScale, 0.001, false)} onChange={(e) => { const v = Math.max(0, parseFloat(e.target.value) || 0); updateSettings({ timeScale: v }); }} />
         </div>
         <div className="grid-2">
             <NumberField label="Y-Spacing" value={settings.spacing} step={5} onScroll={handleSettingScroll('spacing', settings.spacing, 5, false)} onChange={(e) => { const v = Math.max(1, parseFloat(e.target.value) || 1); updateSettings({ spacing: v }); }} />
-            <NumberField label="Line Width" value={settings.lineWidth} step={0.1} onScroll={handleSettingScroll('lineWidth', settings.lineWidth, 0.1, false)} onChange={(e) => { const v = Math.max(0.1, parseFloat(e.target.value) || 0.1); updateSettings({ lineWidth: v }); }} />
+            <SelectField
+                label="Spacing Mode"
+                value={settings.signalSpacingMode || 'pitch'}
+                onChange={(e) => updateSettings({ signalSpacingMode: e.target.value })}
+                options={[
+                    { value: 'pitch', label: 'Constant Pitch' },
+                    { value: 'gap', label: 'Constant Gap' }
+                ]}
+            />
+        </div>
+        <div className="grid-2">
+            <NumberField label="Line Width" value={settings.lineWidth} step={0.1} onScroll={handleSettingScroll('lineWidth', settings.lineWidth, 0.1, false)} onChange={(e) => { const v = Math.max(2, parseFloat(e.target.value) || 2); updateSettings({ lineWidth: v }); }} />
+            <NumberField label="Osc Height" value={settings.oscWaveHeight} step={1} onScroll={handleSettingScroll('oscWaveHeight', settings.oscWaveHeight, 1, false)} onChange={(e) => { const v = Math.max(2, parseFloat(e.target.value) || 2); updateSettings({ oscWaveHeight: v }); }} />
+        </div>
+        <div className="grid-2">
+            <NumberField label="Counter Height" value={settings.counterWaveHeight} step={1} onScroll={handleSettingScroll('counterWaveHeight', settings.counterWaveHeight, 1, false)} onChange={(e) => { const v = Math.max(2, parseFloat(e.target.value) || 2); updateSettings({ counterWaveHeight: v }); }} />
+            <NumberField label="Count Fontsize" value={settings.counterFontSize} onScroll={handleSettingScroll('counterFontSize', settings.counterFontSize, 1, false)} onChange={(e) => { const v = Math.max(2, parseFloat(e.target.value) || 2); updateSettings({ counterFontSize: v }); }} />
         </div>
 
         <div className="tool-settings-block">
             <div className="grid-2">
-                <NumberField label="Label Fontsize" value={settings.fontSize} onScroll={handleSettingScroll('fontSize', settings.fontSize, 1, false)} onChange={(e) => { const v = Math.max(1, parseFloat(e.target.value) || 1); updateSettings({ fontSize: v }); }} />
-                <NumberField label="Count Fontsize" value={settings.counterFontSize} onScroll={handleSettingScroll('counterFontSize', settings.counterFontSize, 1, false)} onChange={(e) => { const v = Math.max(1, parseFloat(e.target.value) || 1); updateSettings({ counterFontSize: v }); }} />
+                <NumberField label="Label Fontsize" value={settings.fontSize} onScroll={handleSettingScroll('fontSize', settings.fontSize, 1, false)} onChange={(e) => { const v = Math.max(2, parseFloat(e.target.value) || 2); updateSettings({ fontSize: v }); }} />
+                <div />
             </div>
 
             <div className="grid-2">
