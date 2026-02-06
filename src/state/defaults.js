@@ -33,14 +33,16 @@ export const DEFAULT_STATE = {
             padding: 8,
             gap: 6,
             border: true,
-            borderWidth: 1
+            borderWidth: 1,
+            cornerRadius: 0
         }
     },
     settings: {
         duration: 350,
         spacing: 60,
+        signalSpacingMode: 'pitch',
         timeScale: 2.0,
-        lineWidth: 1.5,
+        lineWidth: 2,
         boldWeight: 3.0,
         uniformizeGuide: false,
         uniformizeLink: false,
@@ -79,6 +81,11 @@ export const DEFAULT_STATE = {
         guideDashLength: 2,
         guideDashGap: 2,
         guideExtraHeight: 20,
+        guideUseRelativeExtents: false,
+        guideUpperExtension: 120,
+        guideLowerExtension: 240,
+        oscWaveHeight: 30,
+        counterWaveHeight: 24,
         zoneBorderWidth: 0.8,
         zonePatternWidth: 0.8,
         hatchType: 'hatch-45',

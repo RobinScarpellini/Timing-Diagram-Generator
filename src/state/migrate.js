@@ -67,6 +67,22 @@ export const normalizeState = (raw) => {
             }
         });
     }
+    state.settings.duration = Math.max(2, Number(state.settings.duration) || 2);
+    state.settings.lineWidth = Math.max(2, Number(state.settings.lineWidth) || 2);
+    state.settings.fontSize = Math.max(2, Number(state.settings.fontSize) || 2);
+    state.settings.counterFontSize = Math.max(2, Number(state.settings.counterFontSize) || 2);
+    state.settings.oscWaveHeight = Math.max(2, Number(state.settings.oscWaveHeight) || 2);
+    state.settings.counterWaveHeight = Math.max(2, Number(state.settings.counterWaveHeight) || 2);
+
+    const minPeriod = Math.max(2, state.settings.duration / 1000);
+    state.signals = state.signals.map((signal) => {
+        if (signal.type !== 'oscillator') return signal;
+        const parsed = Number(signal.period);
+        return {
+            ...signal,
+            period: Math.max(minPeriod, Number.isFinite(parsed) ? parsed : 100)
+        };
+    });
 
     if (Array.isArray(raw.edgeArrows)) {
         state.edgeArrows = ensureIds(raw.edgeArrows, 'edge-arrow').map((arrow) => ({
@@ -97,7 +113,7 @@ export const normalizeState = (raw) => {
                     state.legend.layout[key] = (typeof value === 'number') ? value : null;
                     return;
                 }
-                if (key === 'padding' || key === 'gap' || key === 'borderWidth') {
+                if (key === 'padding' || key === 'gap' || key === 'borderWidth' || key === 'cornerRadius') {
                     if (typeof value === 'number') state.legend.layout[key] = value;
                     return;
                 }

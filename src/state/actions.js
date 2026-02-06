@@ -12,7 +12,7 @@ export const applySignalValue = (field, value) => {
         return Number.isNaN(parsed) ? -1 : parsed;
     }
     const parsed = parseFloat(value);
-    return Number.isNaN(parsed) ? 0 : parsed;
+    return Number.isNaN(parsed) ? null : parsed;
 };
 
 export const getMaxReferencedEdgeIndex = (appState, oscId) => {
@@ -104,6 +104,7 @@ export const updateSignal = (state, { id, field, value }) => {
         ...sig,
         [field]: (() => {
             let nextValue = applySignalValue(field, value);
+            if (nextValue === null) return sig[field];
             if (field === 'edgeCount' && sig.type === 'oscillator') {
                 if (nextValue < -1) nextValue = -1;
                 if (nextValue >= 0) {
@@ -111,6 +112,10 @@ export const updateSignal = (state, { id, field, value }) => {
                     const minAllowed = maxRef + 1;
                     if (nextValue < minAllowed) nextValue = minAllowed;
                 }
+            }
+            if (field === 'period' && sig.type === 'oscillator') {
+                const minPeriod = Math.max(2, (state.settings?.duration || 0) / 1000);
+                if (nextValue < minPeriod) nextValue = minPeriod;
             }
             return nextValue;
         })()
