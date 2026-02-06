@@ -1,4 +1,8 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 import React from 'react';
+import { CREATION_MODES, isLinkMode, isMeasureMode, isZoneMode } from '../constants/modes';
+import { MODE_EVENTS, transitionCreationMode } from '../state/modeMachine';
 
 const IconLink = () => (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -80,15 +84,15 @@ const CanvasToolbar = ({
     onPasteStyle,
     canPaste
 }) => {
-    const isGuide = creationMode === 'guide';
-    const isZone = creationMode && creationMode.startsWith('zone');
-    const isLink = creationMode && creationMode.startsWith('link');
-    const isDelete = creationMode === 'delete';
-    const isBold = creationMode === 'bold';
-    const isEdgeArrow = creationMode === 'edge-arrow';
-    const isMeasure = creationMode && creationMode.startsWith('measure');
-    const isCopy = creationMode === 'copy';
-    const isPaste = creationMode === 'paste';
+    const isGuide = creationMode === CREATION_MODES.GUIDE;
+    const isZone = isZoneMode(creationMode);
+    const isLink = isLinkMode(creationMode);
+    const isDelete = creationMode === CREATION_MODES.DELETE;
+    const isBold = creationMode === CREATION_MODES.BOLD;
+    const isEdgeArrow = creationMode === CREATION_MODES.EDGE_ARROW;
+    const isMeasure = isMeasureMode(creationMode);
+    const isCopy = creationMode === CREATION_MODES.COPY;
+    const isPaste = creationMode === CREATION_MODES.PASTE;
     const hasActive = isGuide || isZone || isLink || isDelete || isBold || isEdgeArrow || isMeasure || isCopy || isPaste;
     const toolSelectionType = isGuide
         ? 'guide'
@@ -105,21 +109,23 @@ const CanvasToolbar = ({
                             : null;
 
     const toggleMode = (mode) => {
-        if (mode === 'guide') {
-            setCreationMode(isGuide ? null : 'guide');
-        } else if (mode === 'zone') {
-            setCreationMode(isZone ? null : 'zone-start');
-        } else if (mode === 'link') {
-            setCreationMode(isLink ? null : 'link-start');
-        } else if (mode === 'delete') {
-            setCreationMode(isDelete ? null : 'delete');
-        } else if (mode === 'bold') {
-            setCreationMode(isBold ? null : 'bold');
-        } else if (mode === 'edge-arrow') {
-            setCreationMode(isEdgeArrow ? null : 'edge-arrow');
-        } else if (mode === 'measure') {
-            setCreationMode(isMeasure ? null : 'measure-start');
-        }
+        const modeByTool = {
+            guide: CREATION_MODES.GUIDE,
+            zone: CREATION_MODES.ZONE_START,
+            link: CREATION_MODES.LINK_START,
+            delete: CREATION_MODES.DELETE,
+            bold: CREATION_MODES.BOLD,
+            'edge-arrow': CREATION_MODES.EDGE_ARROW,
+            measure: CREATION_MODES.MEASURE_START
+        };
+
+        const resolvedMode = modeByTool[mode];
+        if (!resolvedMode) return;
+
+        setCreationMode((currentMode) => transitionCreationMode(
+            currentMode,
+            { type: MODE_EVENTS.TOOL_TOGGLE, mode: resolvedMode }
+        ));
     };
 
     const toggleCursorFilter = () => {

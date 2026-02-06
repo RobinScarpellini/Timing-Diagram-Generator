@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import './App.css';
 import Diagram from './components/Diagram';
@@ -18,7 +20,17 @@ import {
     reorderSignals as reorderSignalsAction,
     updateSignal as updateSignalAction
 } from './state/actions';
+import {
+    createEdgeArrowCommand,
+    createGuideCommand,
+    createLinkCommand,
+    createMeasurementCommand,
+    createZoneCommand,
+    toggleBoldEdgeCommand
+} from './state/commands';
+import { MODE_EVENTS, transitionCreationMode } from './state/modeMachine';
 import { DIAGRAM_LABEL_COLUMN_WIDTH, DIAGRAM_PADDING } from './constants/layout';
+import { CREATION_MODES, getModeSelectionType, isMeasureMode } from './constants/modes';
 import { HISTORY_LIMIT, PANELS, ZOOM } from './constants/ui';
 import { estimateLegendSize, resolveLegendPosition } from './diagram/legend';
 import { computeDiagramHeightFromLayout, computeSignalLayout, makeSignalLayoutMap } from './diagram/signalLayout';
@@ -55,17 +67,6 @@ function App() {
     const stateRef = useRef(state);
     const [leftPanelWidth, setLeftPanelWidth] = useLocalStorageState('timing_diagram_ui_left_panel_width', 360);
     const [rightPanelWidth, setRightPanelWidth] = useLocalStorageState('timing_diagram_ui_right_panel_width', 420);
-    const getModeSelectionType = useCallback((mode) => {
-        if (!mode) return null;
-        if (mode === 'guide') return 'guide';
-        if (mode.startsWith('zone')) return 'zone';
-        if (mode.startsWith('link')) return 'link';
-        if (mode === 'bold') return 'edge';
-        if (mode === 'edge-arrow') return 'edge-arrow';
-        if (mode.startsWith('measure')) return 'measurement';
-        return null;
-    }, []);
-
     useEffect(() => {
         stateRef.current = state;
     }, [state]);
@@ -76,7 +77,7 @@ function App() {
         if (!modeSelectionType || cursorFilter !== modeSelectionType) {
             setCursorFilter(null);
         }
-    }, [creationMode, cursorFilter, getModeSelectionType]);
+    }, [creationMode, cursorFilter]);
 
     const boldEdgeMap = useMemo(() => {
         const map = new Map();
@@ -398,209 +399,127 @@ function App() {
 
     const handleMeasurementEndpoint = useCallback((endpoint) => {
         if (!endpoint) return;
-        if (creationMode === 'measure-start') {
+        if (creationMode === CREATION_MODES.MEASURE_START) {
             setMeasurementStart(endpoint);
-            setCreationMode('measure-end');
+            setCreationMode((current) => transitionCreationMode(current, { type: MODE_EVENTS.MEASURE_POINT_CAPTURED }, state.settings));
             return;
         }
-        if (creationMode === 'measure-end') {
+        if (creationMode === CREATION_MODES.MEASURE_END) {
             if (!measurementStart) return;
             const newId = generateId();
-            const nextMeasurement = {
+            const nextState = createMeasurementCommand(state, {
                 id: newId,
                 start: measurementStart,
                 end: endpoint,
-                color: state.settings.measurementColor || '#000000',
-                lineWidth: state.settings.measurementLineWidth ?? 1.2,
-                arrowSize: state.settings.measurementArrowSize ?? state.settings.arrowSize,
-                ...(String(state.settings.measurementLabelText || '').trim().length ? {
-                    arrowLabel: {
-                        text: state.settings.measurementLabelText,
-                        size: state.settings.measurementLabelSize ?? state.settings.fontSize,
-                        position: state.settings.measurementLabelPosition || 'top'
-                    }
-                } : {}),
                 y: resolveMeasurementY(endpoint)
-            };
-            setStateAndHistory({
-                ...state,
-                measurements: [...(state.measurements || []), nextMeasurement],
-                layers: {
-                    ...state.layers,
-                    measurements: [...(state.layers?.measurements || []), newId]
-                }
             });
+            setStateAndHistory(nextState);
             setMeasurementStart(null);
-            setCreationMode(null);
+            setCreationMode((current) => transitionCreationMode(current, { type: MODE_EVENTS.MEASURE_COMPLETED }, state.settings));
             setSelection({ type: 'measurement', ids: [newId] });
         }
     }, [creationMode, measurementStart, resolveMeasurementY, state, setStateAndHistory]);
 
     const toggleBoldEdge = (edgeId, pointInfo) => {
-        if (creationMode && creationMode.startsWith('measure')) {
+        if (isMeasureMode(creationMode)) {
             if (pointInfo.counterId) return;
             if (!pointInfo.oscId) return;
             handleMeasurementEndpoint({ kind: 'edge', oscId: pointInfo.oscId, edgeIndex: pointInfo.edgeIndex });
             return;
         }
-        if (creationMode === 'delete') {
+        if (creationMode === CREATION_MODES.DELETE) {
             const existing = state.boldEdges.find((edge) => edge.id === edgeId);
             if (existing) removeBoldEdges([edgeId]);
             return;
         }
         if (creationMode === null) return;
 
-        if (creationMode === 'bold') {
+        if (creationMode === CREATION_MODES.BOLD) {
             if (pointInfo.counterId) return;
             const existing = state.boldEdges.find((edge) => edge.id === edgeId);
             if (existing) {
                 removeBoldEdges([edgeId]);
             } else {
-                const nextBoldEdges = [...state.boldEdges, { id: edgeId, weight: state.settings.boldWeight }];
-                setStateAndHistory({ ...state, boldEdges: nextBoldEdges });
+                setStateAndHistory(toggleBoldEdgeCommand(state, edgeId, state.settings.boldWeight));
                 if (!state.settings.autoBoldEdge) {
                     setSelection({ type: 'edge', ids: [edgeId] });
                 }
             }
-            if (!state.settings.autoBoldEdge) {
-                setCreationMode(null);
-            }
+            setCreationMode((current) => transitionCreationMode(current, { type: MODE_EVENTS.BOLD_COMPLETED }, state.settings));
             return;
         }
 
-        if (creationMode === 'edge-arrow') {
+        if (creationMode === CREATION_MODES.EDGE_ARROW) {
             if (pointInfo.counterId) return;
             const existing = state.edgeArrows.find((arrow) => arrow.oscId === pointInfo.oscId && arrow.edgeIndex === pointInfo.edgeIndex);
             if (existing) {
                 removeEdgeArrows([existing.id]);
             } else {
                 const newId = generateId();
-                const labelText = String(state.settings.edgeArrowLabelText || '');
-                const nextArrows = [
-                    ...state.edgeArrows,
-                    {
-                        id: newId,
-                        oscId: pointInfo.oscId,
-                        edgeIndex: pointInfo.edgeIndex,
-                        type: state.settings.edgeArrowType,
-                        size: state.settings.edgeArrowSize,
-                        ratio: state.settings.edgeArrowRatio,
-                        color: state.settings.edgeArrowColor,
-                        ...(labelText.trim().length ? {
-                            arrowLabel: {
-                                text: labelText,
-                                size: state.settings.edgeArrowLabelSize ?? state.settings.fontSize,
-                                position: state.settings.edgeArrowLabelPosition || 'above'
-                            }
-                        } : {})
-                    }
-                ];
-                setStateAndHistory({
-                    ...state,
-                    edgeArrows: nextArrows,
-                    layers: {
-                        ...state.layers,
-                        edgeArrows: [...(state.layers?.edgeArrows || []), newId]
-                    }
+                const nextState = createEdgeArrowCommand(state, {
+                    id: newId,
+                    oscId: pointInfo.oscId,
+                    edgeIndex: pointInfo.edgeIndex
                 });
+                setStateAndHistory(nextState);
                 if (!state.settings.autoEdgeArrow) {
                     setSelection({ type: 'edge-arrow', ids: [newId] });
                 }
             }
-            if (!state.settings.autoEdgeArrow) {
-                setCreationMode(null);
-            }
+            setCreationMode((current) => transitionCreationMode(current, { type: MODE_EVENTS.EDGE_ARROW_COMPLETED }, state.settings));
             return;
         }
 
-        if (creationMode === 'guide') {
-            if (pointInfo.oscId) {
-                const ref = {
-                    id: generateId(),
-                    oscId: pointInfo.oscId,
-                    edgeIndex: pointInfo.edgeIndex,
-                    style: state.settings.guideStyle,
-                    lineWidth: state.settings.guideLineWidth,
-                    dashLength: state.settings.guideDashLength,
-                    dashGap: state.settings.guideDashGap
-                };
-                const nextGuides = [...state.guides, ref];
-                setStateAndHistory({
-                    ...state,
-                    guides: nextGuides,
-                    layers: {
-                        ...state.layers,
-                        guides: [...(state.layers?.guides || []), ref.id]
-                    }
-                });
-                if (!state.settings.autoGuide) {
-                    setCreationMode(null);
-                    setSelection({ type: 'guide', ids: [ref.id] });
-                }
-            }
-        } else if (creationMode === 'zone-start') {
-            if (pointInfo.oscId) {
-                setTempStart(pointInfo);
-                setCreationMode('zone-end');
-            }
-        } else if (creationMode === 'zone-end') {
+        if (creationMode === CREATION_MODES.GUIDE) {
             if (pointInfo.oscId) {
                 const newId = generateId();
-                const nextZones = [...state.zones, {
+                const nextState = createGuideCommand(state, {
                     id: newId,
-                    start: { oscId: tempStart.oscId, edgeIndex: tempStart.edgeIndex },
-                    end: { oscId: pointInfo.oscId, edgeIndex: pointInfo.edgeIndex },
-                    oscillatorId: pointInfo.oscId,
-                    hatchType: state.settings.hatchType,
-                    color: state.settings.zoneColor,
-                    borderWidth: state.settings.zoneBorderWidth,
-                    patternWidth: state.settings.zonePatternWidth
-                }];
-                setCreationMode(state.settings.autoZone ? 'zone-start' : null);
-                setTempStart(null);
-                setStateAndHistory({
-                    ...state,
-                    zones: nextZones,
-                    layers: {
-                        ...state.layers,
-                        zones: [...(state.layers?.zones || []), newId]
-                    }
+                    oscId: pointInfo.oscId,
+                    edgeIndex: pointInfo.edgeIndex
                 });
+                setStateAndHistory(nextState);
+                if (!state.settings.autoGuide) {
+                    setSelection({ type: 'guide', ids: [newId] });
+                }
+                setCreationMode((current) => transitionCreationMode(current, { type: MODE_EVENTS.GUIDE_COMPLETED }, state.settings));
+            }
+        } else if (creationMode === CREATION_MODES.ZONE_START) {
+            if (pointInfo.oscId) {
+                setTempStart(pointInfo);
+                setCreationMode((current) => transitionCreationMode(current, { type: MODE_EVENTS.ZONE_POINT_CAPTURED }, state.settings));
+            }
+        } else if (creationMode === CREATION_MODES.ZONE_END) {
+            if (pointInfo.oscId) {
+                const newId = generateId();
+                const nextState = createZoneCommand(state, {
+                    id: newId,
+                    start: tempStart,
+                    end: pointInfo
+                });
+                setTempStart(null);
+                setStateAndHistory(nextState);
                 if (!state.settings.autoZone) {
                     setSelection({ type: 'zone', ids: [newId] });
                 }
+                setCreationMode((current) => transitionCreationMode(current, { type: MODE_EVENTS.ZONE_COMPLETED }, state.settings));
             }
-        } else if (creationMode === 'link-start') {
+        } else if (creationMode === CREATION_MODES.LINK_START) {
             setTempStart(pointInfo);
-            setCreationMode('link-end');
-        } else if (creationMode === 'link-end') {
+            setCreationMode((current) => transitionCreationMode(current, { type: MODE_EVENTS.LINK_POINT_CAPTURED }, state.settings));
+        } else if (creationMode === CREATION_MODES.LINK_END) {
             const newId = generateId();
-            const nextLinks = [...state.links, {
+            const nextState = createLinkCommand(state, {
                 id: newId,
                 start: tempStart,
-                end: pointInfo,
-                color: state.settings.linkColor,
-                style: state.settings.linkStyle,
-                lineWidth: state.settings.linkLineWidth,
-                dashLength: state.settings.linkDashLength,
-                dashGap: state.settings.linkDashGap,
-                arrowSize: state.settings.arrowSize,
-                startMarker: state.settings.linkStartMarker,
-                endMarker: state.settings.linkEndMarker
-            }];
-            setCreationMode(state.settings.autoLink ? 'link-start' : null);
-            setTempStart(null);
-            setStateAndHistory({
-                ...state,
-                links: nextLinks,
-                layers: {
-                    ...state.layers,
-                    links: [...(state.layers?.links || []), newId]
-                }
+                end: pointInfo
             });
+            setTempStart(null);
+            setStateAndHistory(nextState);
             if (!state.settings.autoLink) {
                 setSelection({ type: 'link', ids: [newId] });
             }
+            setCreationMode((current) => transitionCreationMode(current, { type: MODE_EVENTS.LINK_COMPLETED }, state.settings));
         }
     };
 
@@ -770,20 +689,20 @@ function App() {
             return;
         }
 
-        if (creationMode === 'delete') return;
-        if (creationMode && creationMode.startsWith('measure')) {
+        if (creationMode === CREATION_MODES.DELETE) return;
+        if (isMeasureMode(creationMode)) {
             if (type === 'guide' && element?.id) {
                 handleMeasurementEndpoint({ kind: 'guide', guideId: element.id });
             }
             return;
         }
-        if (creationMode === 'copy') {
+        if (creationMode === CREATION_MODES.COPY) {
             copyFromElement(type, element);
             setSelection({ type, ids: [element.id] });
             setCreationMode(null);
             return;
         }
-        if (creationMode === 'paste') {
+        if (creationMode === CREATION_MODES.PASTE) {
             if (styleClipboard?.type === type) {
                 pasteToElement(type, element);
                 setSelection({ type, ids: [element.id] });
@@ -801,13 +720,13 @@ function App() {
             copyFromSelection();
             return;
         }
-        setCreationMode((prev) => (prev === 'copy' ? null : 'copy'));
-    }, [selection, copyFromSelection]);
+        setCreationMode((current) => transitionCreationMode(current, { type: MODE_EVENTS.TOOL_TOGGLE, mode: CREATION_MODES.COPY }, state.settings));
+    }, [selection, copyFromSelection, state.settings]);
 
     const handlePasteButton = useCallback(() => {
         if (!styleClipboard) return;
-        setCreationMode((prev) => (prev === 'paste' ? null : 'paste'));
-    }, [styleClipboard]);
+        setCreationMode((current) => transitionCreationMode(current, { type: MODE_EVENTS.TOOL_TOGGLE, mode: CREATION_MODES.PASTE }, state.settings));
+    }, [styleClipboard, state.settings]);
 
     const canPaste = Boolean(styleClipboard);
     const clipboardType = styleClipboard?.type ?? null;
@@ -876,14 +795,14 @@ function App() {
                 if (selection?.ids?.length) {
                     copyFromSelection();
                 } else {
-                    setCreationMode('copy');
+                    setCreationMode(CREATION_MODES.COPY);
                 }
             } else if (key === 'v') {
                 event.preventDefault();
                 if (selection && styleClipboard?.type === selection.type) {
                     pasteToSelection();
                 } else if (styleClipboard) {
-                    setCreationMode('paste');
+                    setCreationMode(CREATION_MODES.PASTE);
                 }
             }
         };
@@ -1122,15 +1041,20 @@ function App() {
                     <div className="canvas-toolbar-shell">
                         <CanvasToolbar
                             creationMode={creationMode}
-                            setCreationMode={(nextMode) => {
+                            setCreationMode={(nextModeOrUpdater) => {
+                                const nextMode = typeof nextModeOrUpdater === 'function'
+                                    ? nextModeOrUpdater(creationMode)
+                                    : nextModeOrUpdater;
                                 const nextSelectionType = getModeSelectionType(nextMode);
-                                const isSpecial = nextMode === 'delete' || nextMode === 'copy' || nextMode === 'paste';
+                                const isSpecial = nextMode === CREATION_MODES.DELETE
+                                    || nextMode === CREATION_MODES.COPY
+                                    || nextMode === CREATION_MODES.PASTE;
                                 if (nextMode && !isSpecial) {
                                     setSelection(null);
                                 }
-                                if (!nextMode || !String(nextMode).startsWith('measure')) {
+                                if (!nextMode || !isMeasureMode(nextMode)) {
                                     setMeasurementStart(null);
-                                } else if (nextMode === 'measure-start') {
+                                } else if (nextMode === CREATION_MODES.MEASURE_START) {
                                     setMeasurementStart(null);
                                 }
                                 if (!nextSelectionType || (cursorFilter && cursorFilter !== nextSelectionType)) {

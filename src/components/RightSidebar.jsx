@@ -1,8 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 import React, { useEffect, useRef, useState } from 'react';
 import RightSidebarGeneralSettings from './RightSidebarGeneralSettings';
 import RightSidebarLegendPanel from './rightSidebar/RightSidebarLegendPanel';
 import RightSidebarSelectionPanel from './rightSidebar/RightSidebarSelectionPanel';
 import RightSidebarToolPanel from './rightSidebar/RightSidebarToolPanel';
+import { addLegendEntryCommand, removeLegendEntryCommand, setLegendLayoutCommand, updateLegendEntryCommand } from '../state/commands';
 
 const RightSidebar = ({
     style,
@@ -71,23 +74,12 @@ const RightSidebar = ({
     };
 
     const updateLegendLayout = (patch) => {
-        applyStateBatch((current) => ({
-            ...current,
-            legend: {
-                ...(current.legend || {}),
-                layout: {
-                    ...((current.legend && current.legend.layout) || {}),
-                    ...patch
-                }
-            }
-        }));
+        applyStateBatch((current) => setLegendLayoutCommand(current, patch));
     };
 
-    const addLegendEntry = (type) => {
+    const addLegendEntry = (type = 'line') => {
         const newId = `legend-${Math.random().toString(36).slice(2, 10)}`;
         applyStateBatch((current) => {
-            const nextLegend = current.legend || { entries: [], layout: {} };
-            const nextEntries = Array.isArray(nextLegend.entries) ? nextLegend.entries : [];
             const entry = {
                 id: newId,
                 type,
@@ -99,43 +91,17 @@ const RightSidebar = ({
                 hatchType: current.settings?.hatchType || 'hatch-45',
                 patternWidth: current.settings?.zonePatternWidth || 0.8
             };
-            return {
-                ...current,
-                legend: {
-                    ...nextLegend,
-                    entries: [...nextEntries, entry]
-                }
-            };
+            return addLegendEntryCommand(current, entry);
         });
         setSelectedLegendEntryId(newId);
     };
 
     const updateLegendEntry = (id, patch) => {
-        applyStateBatch((current) => {
-            const nextLegend = current.legend || { entries: [], layout: {} };
-            const nextEntries = Array.isArray(nextLegend.entries) ? nextLegend.entries : [];
-            return {
-                ...current,
-                legend: {
-                    ...nextLegend,
-                    entries: nextEntries.map((entry) => entry?.id === id ? { ...entry, ...patch } : entry)
-                }
-            };
-        });
+        applyStateBatch((current) => updateLegendEntryCommand(current, id, patch));
     };
 
     const removeLegendEntry = (id) => {
-        applyStateBatch((current) => {
-            const nextLegend = current.legend || { entries: [], layout: {} };
-            const nextEntries = Array.isArray(nextLegend.entries) ? nextLegend.entries : [];
-            return {
-                ...current,
-                legend: {
-                    ...nextLegend,
-                    entries: nextEntries.filter((entry) => entry?.id !== id)
-                }
-            };
-        });
+        applyStateBatch((current) => removeLegendEntryCommand(current, id));
         if (selectedLegendEntryId === id) setSelectedLegendEntryId(null);
     };
 
