@@ -13,9 +13,9 @@ describe('geometry', () => {
         expect(getOscillatorEdgeTime(oscillator, 3, 100)).toBe(35);
     });
 
-    it('clamps oscillator period to minimum allowed from duration', () => {
+    it('clamps oscillator period to fixed minimum', () => {
         const oscillator = { period: 1, delay: 0 };
-        expect(getSafeOscillatorPeriod(oscillator, 12000)).toBe(12);
+        expect(getSafeOscillatorPeriod(oscillator, 12000)).toBe(2);
     });
 
     it('resolves counter edges with polarity and selected reference oscillator', () => {

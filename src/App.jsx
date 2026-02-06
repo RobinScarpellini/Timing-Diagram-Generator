@@ -215,8 +215,7 @@ function App() {
         const direction = e.deltaY > 0 ? -1 : 1;
         const next = parseFloat((value + direction * step).toFixed(6));
         if (key === 'period') {
-            const duration = stateRef.current?.settings?.duration || 0;
-            const minPeriod = Math.max(2, duration / 1000);
+            const minPeriod = 2;
             if (next < minPeriod) return;
         }
         if (!allowNegative && next < 0) return;

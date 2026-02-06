@@ -171,7 +171,7 @@ export const normalizeState = (raw) => {
     state.settings.zonePatternWidth = Math.max(0.1, Number(state.settings.zonePatternWidth) || 0.1);
     state.settings.hatchType = toOption(state.settings.hatchType, HATCH_TYPE_OPTIONS, HATCH_TYPES.HATCH_45);
 
-    const minPeriod = Math.max(2, state.settings.duration / 1000);
+    const minPeriod = 2;
     state.signals = state.signals.map((signal) => {
         if (signal.type !== SIGNAL_TYPES.OSCILLATOR) return signal;
         const parsed = Number(signal.period);

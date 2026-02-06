@@ -14,7 +14,7 @@ const makeState = (patch = {}) => ({
 });
 
 describe('state actions', () => {
-    it('clamps oscillator period to duration-based minimum', () => {
+    it('clamps oscillator period to fixed minimum', () => {
         const state = makeState({
             settings: { duration: 10000 },
             signals: [{
@@ -30,7 +30,26 @@ describe('state actions', () => {
         });
 
         const next = updateSignal(state, { id: 'osc-1', field: 'period', value: 1 });
-        expect(next.signals[0].period).toBe(10);
+        expect(next.signals[0].period).toBe(2);
+    });
+
+    it('keeps explicit period values even for large duration', () => {
+        const state = makeState({
+            settings: { duration: 202000 },
+            signals: [{
+                id: 'osc-1',
+                type: 'oscillator',
+                name: 'CLK 1',
+                period: 100,
+                delay: 0,
+                edgeCount: -1,
+                inverted: false,
+                color: '#000000'
+            }]
+        });
+
+        const next = updateSignal(state, { id: 'osc-1', field: 'period', value: 102 });
+        expect(next.signals[0].period).toBe(102);
     });
 
     it('prevents reducing oscillator edge count below referenced elements', () => {

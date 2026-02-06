@@ -2,10 +2,10 @@
 
 import { EDGE_POLARITY, SIGNAL_TYPES } from '../../constants/signal';
 
-export const getMinAllowedPeriod = (duration = 0) => Math.max(
-    2,
-    (Number.isFinite(duration) && duration > 0) ? (duration / 1000) : 0
-);
+export const getMinAllowedPeriod = (duration = 0) => {
+    void duration;
+    return 2;
+};
 
 export const getSafeOscillatorPeriod = (oscillator, duration = 0) => {
     const parsed = Number(oscillator?.period);
