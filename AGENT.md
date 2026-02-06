@@ -13,7 +13,9 @@ Project memory for durable architecture and workflow notes. Keep it concise.
 - `src/state/defaults.js`: canonical default schema.
 - `src/state/migrate.js`: JSON normalization on load/import.
 - `src/state/actions.js`: pure state mutation helpers.
-- `src/diagram/geometry.js`: signal timing math.
+- `src/domain/timing/index.js`: canonical timing math (oscillator/counter).
+- `src/diagram/geometry.js`: compatibility re-export for timing math.
+- `src/constants/signal.js`, `src/constants/modes.js`, `src/constants/layers.js`, `src/constants/styles.js`: shared enums/options.
 - `src/components/rightSidebar/*`: tool, selection, legend editors.
 
 ## State Rules

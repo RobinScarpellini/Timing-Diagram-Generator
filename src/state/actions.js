@@ -1,57 +1,25 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+import { LAYER_KEY_BY_STATE_KEY } from '../constants/layers';
+import { EDGE_POLARITY, SIGNAL_TYPES } from '../constants/signal';
+import { clampCounterEdgeRange, getMinAllowedPeriod, getVisibleCounterEdgeCount } from '../domain/timing';
+
 const generateSignalName = (signals, type, prefix) => {
     const count = signals.filter((s) => s.type === type).length;
     return `${prefix} ${count + 1}`;
 };
 
-const getSafeOscillatorPeriod = (period, duration) => {
-    const minPeriod = Math.max(2, (duration || 0) / 1000);
-    const parsed = Number(period);
-    const base = Number.isFinite(parsed) && parsed > 0 ? parsed : 100;
-    return Math.max(minPeriod, base);
-};
-
-const getVisibleCounterEdgeCount = (state, counter) => {
-    const duration = state.settings?.duration || 0;
-    const oscillators = state.signals.filter((s) => s.type === 'oscillator');
-    const ref = oscillators.find((o) => o.id === counter.referenceOscId) || oscillators[0];
-    if (!ref) return 1;
-
-    const halfPeriod = getSafeOscillatorPeriod(ref.period, duration) / 2;
-    const delay = ref.delay || 0;
-    const polarity = counter.polarity || 'rising';
-    const edgeLimit = ref.edgeCount ?? -1;
-    const maxEdgeIndex = edgeLimit >= 0 ? edgeLimit - 1 : Infinity;
-
-    let count = 0;
-    const maxK = Math.floor((duration - delay) / halfPeriod);
-    const minK = Math.floor((-delay) / halfPeriod);
-    for (let k = minK; k <= maxK; k++) {
-        if (k >= 0 && k > maxEdgeIndex) break;
-        const t = delay + k * halfPeriod;
-        if (t < 0 || t > duration) continue;
-        const isRefRising = (k % 2 === 0);
-        const effectiveRising = ref.inverted ? !isRefRising : isRefRising;
-        const matches = (polarity === 'rising' && effectiveRising) || (polarity === 'falling' && !effectiveRising);
-        if (matches) count++;
-    }
-    return Math.max(1, count);
-};
-
 const clampCounterRange = (state, counter) => {
-    const visible = getVisibleCounterEdgeCount(state, counter);
-    let startEdge = Math.max(1, parseInt(counter.startEdge, 10) || 1);
-    let endEdge = Math.max(1, parseInt(counter.endEdge, 10) || 1);
-    startEdge = Math.min(startEdge, visible);
-    endEdge = Math.min(endEdge, visible);
-    if (startEdge > endEdge) {
-        endEdge = startEdge;
-    }
-    return { ...counter, startEdge, endEdge };
+    const visible = getVisibleCounterEdgeCount(counter, {
+        duration: state.settings?.duration || 0,
+        oscillators: state.signals.filter((signal) => signal.type === SIGNAL_TYPES.OSCILLATOR)
+    });
+    return clampCounterEdgeRange(counter, visible);
 };
 
 export const normalizeCounterRanges = (state) => ({
     ...state,
-    signals: state.signals.map((sig) => (sig.type === 'counter' ? clampCounterRange(state, sig) : sig))
+    signals: state.signals.map((sig) => (sig.type === SIGNAL_TYPES.COUNTER ? clampCounterRange(state, sig) : sig))
 });
 
 export const applySignalValue = (field, value) => {
@@ -121,8 +89,8 @@ export const addOscillator = (state, id) => {
         ...state.signals,
         {
             id,
-            type: 'oscillator',
-            name: generateSignalName(state.signals, 'oscillator', 'CLK'),
+            type: SIGNAL_TYPES.OSCILLATOR,
+            name: generateSignalName(state.signals, SIGNAL_TYPES.OSCILLATOR, 'CLK'),
             period: 100,
             delay: 0,
             edgeCount: -1,
@@ -134,18 +102,18 @@ export const addOscillator = (state, id) => {
 };
 
 export const addCounter = (state, id) => {
-    const oscillators = state.signals.filter((s) => s.type === 'oscillator');
+    const oscillators = state.signals.filter((s) => s.type === SIGNAL_TYPES.OSCILLATOR);
     const nextSignals = [
         ...state.signals,
         {
             id,
-            type: 'counter',
-            name: generateSignalName(state.signals, 'counter', 'CNT'),
+            type: SIGNAL_TYPES.COUNTER,
+            name: generateSignalName(state.signals, SIGNAL_TYPES.COUNTER, 'CNT'),
             startEdge: 1,
             endEdge: 10,
             color: '#000000',
             referenceOscId: oscillators.length > 0 ? oscillators[0].id : null,
-            polarity: 'rising'
+            polarity: EDGE_POLARITY.RISING
         }
     ];
     return normalizeCounterRanges({ ...state, signals: nextSignals });
@@ -156,7 +124,7 @@ export const updateSignal = (state, { id, field, value }) => {
         if (sig.id !== id) return sig;
         let nextValue = applySignalValue(field, value);
         if (nextValue === null) return sig;
-        if (field === 'edgeCount' && sig.type === 'oscillator') {
+        if (field === 'edgeCount' && sig.type === SIGNAL_TYPES.OSCILLATOR) {
             if (nextValue < -1) nextValue = -1;
             if (nextValue >= 0) {
                 const maxRef = getMaxReferencedEdgeIndex(state, sig.id);
@@ -164,15 +132,15 @@ export const updateSignal = (state, { id, field, value }) => {
                 if (nextValue < minAllowed) nextValue = minAllowed;
             }
         }
-        if (field === 'period' && sig.type === 'oscillator') {
-            const minPeriod = Math.max(2, (state.settings?.duration || 0) / 1000);
+        if (field === 'period' && sig.type === SIGNAL_TYPES.OSCILLATOR) {
+            const minPeriod = getMinAllowedPeriod(state.settings?.duration || 0);
             if (nextValue < minPeriod) nextValue = minPeriod;
         }
         let nextSignal = {
             ...sig,
             [field]: nextValue
         };
-        if (sig.type === 'counter') {
+        if (sig.type === SIGNAL_TYPES.COUNTER) {
             nextSignal = clampCounterRange(state, nextSignal);
         }
         return nextSignal;
@@ -267,14 +235,7 @@ export const patchItemsByIds = (state, key, ids, patch) => {
 export const removeItemsByIds = (state, key, ids) => {
     const idSet = new Set(ids);
     const list = state[key] || [];
-    const layerKeyByStateKey = {
-        guides: 'guides',
-        zones: 'zones',
-        links: 'links',
-        edgeArrows: 'edgeArrows',
-        measurements: 'measurements'
-    };
-    const layerKey = layerKeyByStateKey[key];
+    const layerKey = LAYER_KEY_BY_STATE_KEY[key];
     const nextLayers = (state.layers && layerKey && Array.isArray(state.layers[layerKey]))
         ? {
             ...state.layers,
