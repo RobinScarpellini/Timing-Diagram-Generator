@@ -78,10 +78,13 @@ body {
 
 .right-sidebar-scroll {
     overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .right-sidebar-content {
     padding: 12px 16px 16px;
+    min-width: 0;
+    overflow-x: hidden;
 }
 
 .right-sidebar-general-settings {
@@ -150,7 +153,7 @@ body {
     min-width: 100%;
     display: flex;
     flex-direction: column;
-    align-items: stretch;
+    align-items: center;
     justify-content: center;
     padding-top: var(--canvas-toolbar-offset);
     padding-bottom: 10px;
@@ -352,7 +355,7 @@ body {
 
 .grid-2 {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.4rem;
 }
 
@@ -361,6 +364,7 @@ body {
     flex-direction: column;
     gap: 0.2rem;
     margin-bottom: 1px;
+    min-width: 0;
 }
 
 .input-group:last-child {
@@ -435,6 +439,7 @@ body {
     gap: 6px;
     align-items: center;
     margin-bottom: 10px;
+    flex-wrap: wrap;
 }
 
 .legend-list {
@@ -442,6 +447,14 @@ body {
     flex-direction: column;
     gap: 6px;
     margin-top: 8px;
+    min-width: 0;
+}
+
+.legend-item-row {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 6px;
+    align-items: center;
 }
 
 .legend-item {
@@ -455,6 +468,7 @@ body {
     background: #ffffff;
     cursor: pointer;
     text-align: left;
+    min-width: 0;
 }
 
 .legend-item.active {
@@ -462,11 +476,33 @@ body {
     box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
 }
 
+.legend-item-copy-btn {
+    background: #ffffff;
+    color: #334155;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    font-size: 0.85rem;
+    line-height: 1;
+}
+
+.legend-item-copy-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.legend-item-copy-btn:hover:not(:disabled) {
+    background: #f1f5f9;
+}
+
 .legend-item-type {
     font-size: 0.7rem;
     font-weight: 900;
     letter-spacing: 0.08em;
     color: #64748b;
+    white-space: nowrap;
 }
 
 .legend-item-swatch {
@@ -483,6 +519,35 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.legend-panel,
+.legend-top-section,
+.legend-layout-settings {
+    min-width: 0;
+}
+
+.legend-add-toolbar .input-group {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+.legend-add-btn {
+    min-height: 28px;
+}
+
+.legend-entry-settings {
+    margin-top: 12px;
+}
+
+.legend-remove-row {
+    margin-top: 10px;
+    margin-bottom: 0;
+}
+
+.legend-separator {
+    margin-top: 14px;
+    margin-bottom: 14px;
 }
 
 .color-picker {
@@ -661,6 +726,12 @@ button {
     cursor: pointer;
 }
 
+.legend-item-copy-btn {
+    background: #ffffff;
+    color: #334155;
+    border: 1px solid #e2e8f0;
+}
+
 
 
 
@@ -781,7 +852,7 @@ button {
 
 .diagram-canvas {
     background: #ffffff;
-    padding: 15px;
+    padding: 0;
     display: block;
     width: max-content;
     margin: 0 auto;

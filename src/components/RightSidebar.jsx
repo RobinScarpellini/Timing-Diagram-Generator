@@ -139,6 +139,68 @@ const RightSidebar = ({
         if (selectedLegendEntryId === id) setSelectedLegendEntryId(null);
     };
 
+    const buildLegendStylePatchFromSelection = () => {
+        if (selection?.type === 'zone' && selectedZone) {
+            return {
+                type: 'hatch',
+                color: selectedZone.color ?? settings.zoneColor ?? '#000000',
+                lineWidth: selectedZone.borderWidth ?? settings.zoneBorderWidth ?? 1.2,
+                hatchType: selectedZone.hatchType ?? settings.hatchType ?? 'hatch-45',
+                patternWidth: selectedZone.patternWidth ?? settings.zonePatternWidth ?? 0.8
+            };
+        }
+        if (selection?.type === 'link' && selectedLink) {
+            return {
+                type: 'arrow',
+                color: selectedLink.color ?? settings.linkColor ?? '#000000',
+                lineWidth: selectedLink.lineWidth ?? settings.linkLineWidth ?? 1.2,
+                arrowSize: selectedLink.arrowSize ?? settings.arrowSize ?? 10,
+                arrowRatio: 1.4
+            };
+        }
+        if (selection?.type === 'edge-arrow' && selectedArrow) {
+            return {
+                type: 'arrow',
+                color: selectedArrow.color ?? settings.edgeArrowColor ?? '#000000',
+                lineWidth: 1.2,
+                arrowSize: selectedArrow.size ?? settings.edgeArrowSize ?? 10,
+                arrowRatio: selectedArrow.ratio ?? settings.edgeArrowRatio ?? 1.4
+            };
+        }
+        if (selection?.type === 'measurement' && selectedMeasurement) {
+            return {
+                type: 'arrow',
+                color: selectedMeasurement.color ?? '#000000',
+                lineWidth: selectedMeasurement.lineWidth ?? 1.2,
+                arrowSize: selectedMeasurement.arrowSize ?? settings.arrowSize ?? 10,
+                arrowRatio: 1.4
+            };
+        }
+        if (selection?.type === 'guide' && selectedGuide) {
+            return {
+                type: 'line',
+                color: '#000000',
+                lineWidth: selectedGuide.lineWidth ?? settings.guideLineWidth ?? 1
+            };
+        }
+        if (selection?.type === 'edge' && selectedEdge) {
+            return {
+                type: 'line',
+                color: '#000000',
+                lineWidth: selectedEdge.weight ?? settings.boldWeight ?? 2
+            };
+        }
+        return null;
+    };
+
+    const copyStyleToLegendEntry = (entryId) => {
+        const patch = buildLegendStylePatchFromSelection();
+        if (!patch) return;
+        updateLegendEntry(entryId, patch);
+        setSelectedLegendEntryId(entryId);
+    };
+    const canCopyLegendStyle = Boolean(buildLegendStylePatchFromSelection());
+
     const getSelectedIdsForType = (type) => {
         if (type === 'guide') return selectedGuides.map((item) => item.id).filter(Boolean);
         if (type === 'zone') return selectedZones.map((item) => item.id).filter(Boolean);
@@ -510,6 +572,8 @@ const RightSidebar = ({
                             removeLegendEntry={removeLegendEntry}
                             updateLegendLayout={updateLegendLayout}
                             makeScroll={makeScroll}
+                            copyStyleToLegendEntry={copyStyleToLegendEntry}
+                            canCopyLegendStyle={canCopyLegendStyle}
                         />
                     )}
                 </div>
