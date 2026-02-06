@@ -1,268 +1,28 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 import React, { useMemo } from 'react';
 import {
     DIAGRAM_LABEL_COLUMN_WIDTH,
     DIAGRAM_MIN_HEIGHT,
     DIAGRAM_PADDING
 } from '../constants/layout';
-import { getOscillatorLevelAt, getSafeOscillatorPeriod, getSignalEdgeTime } from '../diagram/geometry';
+import { CREATION_MODES, isEdgeToolMode, isMeasureMode } from '../constants/modes';
+import { SIGNAL_TYPES } from '../constants/signal';
+import { getSafeOscillatorPeriod } from '../diagram/geometry';
 import { estimateLegendSize, resolveLegendPosition } from '../diagram/legend';
 import { computeDiagramHeightFromLayout, computeSignalLayout, makeSignalLayoutMap } from '../diagram/signalLayout';
-
-const getDashPatternValue = (style, len, gap) => {
-    const safeLen = Math.max(0.1, Number(len) || 0.1);
-    const safeGap = Math.max(0.1, Number(gap) || 0.1);
-    if (style === 'dashed') return `${safeLen},${safeGap}`;
-    if (style === 'dotted') return `${safeLen},${safeGap}`;
-    return '';
-};
-
-const renderLinkElements = ({
-    links,
-    signals,
-    signalLayoutById,
-    timeScale,
-    labelColumnWidth,
-    selection,
-    creationMode,
-    canInteractWithElement,
-    getCursorForElement,
-    linkLineWidth,
-    linkStartMarker,
-    linkEndMarker,
-    linkColor,
-    arrowSize,
-    defaultDash,
-    linkStyle,
-    fontFamily,
-    defaultLabelSize,
-    deleteLink,
-    onElementClick,
-    edgeTimeCtx
-}) => {
-    if (!links?.length) return null;
-    return links.map((link) => {
-        const sStart = signals.find((s) => s.id === link.start.oscId || s.id === link.start.counterId);
-        const sEnd = signals.find((s) => s.id === link.end.oscId || s.id === link.end.counterId);
-
-        if (!sStart || !sEnd) return null;
-
-        const geoStart = signalLayoutById.get(sStart.id);
-        const geoEnd = signalLayoutById.get(sEnd.id);
-        if (!geoStart || !geoEnd) return null;
-        const ySBase = geoStart.bottom;
-        const yEBase = geoEnd.bottom;
-        const startHeight = geoStart.height;
-        const endHeight = geoEnd.height;
-
-        const tStart = getSignalEdgeTime(sStart, link.start.edgeIndex, edgeTimeCtx);
-        const tEnd = getSignalEdgeTime(sEnd, link.end.edgeIndex, edgeTimeCtx);
-        const x1 = labelColumnWidth + tStart * timeScale;
-        const x2 = labelColumnWidth + tEnd * timeScale;
-
-        let yS;
-        let yE;
-        if (geoStart.index < geoEnd.index) {
-            yS = ySBase;
-            yE = yEBase - endHeight;
-        } else {
-            yS = ySBase - startHeight;
-            yE = yEBase;
-        }
-
-        const isSelected = selection?.type === 'link' && selection?.ids?.includes(link.id);
-        const dash = link.style
-            ? getDashPatternValue(link.style, link.dashLength || 8, link.dashGap || 4)
-            : defaultDash;
-        const linkStrokeColor = link.color || linkColor;
-        const markerSize = link.arrowSize ?? arrowSize ?? 10;
-        const markerColorId = linkStrokeColor.replace(/[^a-zA-Z0-9]/g, '');
-        const markerId = `${markerColorId}-${Math.round(markerSize * 100)}`;
-
-        const cursor = getCursorForElement('link');
-
-        return (
-            <g key={link.id}>
-                <line
-                    x1={x1} y1={yS} x2={x2} y2={yE}
-                    stroke="transparent"
-                    strokeWidth={12}
-                    pointerEvents={canInteractWithElement('link') ? 'stroke' : 'none'}
-                    style={{ cursor }}
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        if (creationMode === 'delete') {
-                            deleteLink(link.id);
-                        } else if (onElementClick && link.id) {
-                            onElementClick('link', link, { multi: e.shiftKey || e.ctrlKey || e.metaKey });
-                        }
-                    }}
-                />
-                <line x1={x1} y1={ySBase} x2={x1} y2={ySBase - startHeight} stroke={linkStrokeColor} strokeWidth={(link.lineWidth || linkLineWidth) * 0.5} strokeDasharray={dash} opacity="0.2" />
-                <line x1={x2} y1={yEBase} x2={x2} y2={yEBase - endHeight} stroke={linkStrokeColor} strokeWidth={(link.lineWidth || linkLineWidth) * 0.5} strokeDasharray={dash} opacity="0.2" />
-                <line
-                    x1={x1} y1={yS} x2={x2} y2={yE}
-                    stroke={linkStrokeColor}
-                    strokeWidth={link.lineWidth || linkLineWidth}
-                    strokeDasharray={dash}
-                    strokeLinecap={(link.style || linkStyle || 'solid') === 'dotted' ? 'round' : 'butt'}
-                    markerStart={(link.startMarker || linkStartMarker) === 'arrow' ? `url(#arrowhead-start-${markerId})` : (link.startMarker || linkStartMarker) === 'dot' ? `url(#dot-${markerId})` : 'none'}
-                    markerEnd={(link.endMarker || linkEndMarker) === 'arrow' ? `url(#arrowhead-${markerId})` : (link.endMarker || linkEndMarker) === 'dot' ? `url(#dot-${markerId})` : 'none'}
-                />
-                {isSelected && (
-                    <line
-                        x1={x1} y1={yS} x2={x2} y2={yE}
-                        stroke="#2563eb"
-                        strokeWidth={(link.lineWidth || linkLineWidth) + 3}
-                        opacity={0.35}
-                        pointerEvents="none"
-                    />
-                )}
-                {(() => {
-                    const label = link.arrowLabel?.text;
-                    if (!label || !String(label).trim().length) return null;
-                    const size = Math.max(6, link.arrowLabel?.size ?? defaultLabelSize ?? 10);
-                    const pos = link.arrowLabel?.position || 'above';
-                    const midX = (x1 + x2) / 2;
-                    const midY = (yS + yE) / 2;
-                    const isCenter = pos === 'center';
-                    const dy = pos === 'below' ? (size + 6) : pos === 'above' ? -6 : 0;
-                    const textValue = String(label);
-                    const padX = 6;
-                    const padY = 3;
-                    const labelW = textValue.length * size * 0.62 + padX * 2;
-                    const labelH = size + padY * 2;
-                    const textY = midY + dy;
-                    return (
-                        <g pointerEvents="none">
-                            {isCenter && (
-                                <rect
-                                    x={midX - labelW / 2}
-                                    y={textY - size * 0.82}
-                                    width={labelW}
-                                    height={labelH}
-                                    fill="#ffffff"
-                                    rx={3}
-                                    ry={3}
-                                />
-                            )}
-                            <text
-                                x={midX}
-                                y={textY}
-                                fontSize={size}
-                                fontFamily={fontFamily}
-                                fill={linkStrokeColor}
-                                textAnchor="middle"
-                            >
-                                {textValue}
-                            </text>
-                        </g>
-                    );
-                })()}
-            </g>
-        );
-    });
-};
-
-const renderGuideElements = ({
-    guides,
-    signals,
-    signalLayoutById,
-    duration,
-    timeScale,
-    labelColumnWidth,
-    guideHeight,
-    guideStyle,
-    guideDashLength,
-    guideDashGap,
-    guideLineWidth,
-    guideUseRelativeExtents,
-    guideUpperExtension,
-    guideLowerExtension,
-    selection,
-    creationMode,
-    canInteractWithElement,
-    getCursorForElement,
-    deleteGuide,
-    onElementClick
-}) => {
-    if (!guides?.length) return null;
-    return guides.map((g) => {
-        const osc = signals.find((s) => s.id === g.oscId);
-        if (!osc) return null;
-        const geo = signalLayoutById.get(g.oscId);
-        if (!geo) return null;
-        const edgeY = geo.mid;
-        const hasCustomExtents = Number.isFinite(g.upperExtension) && Number.isFinite(g.lowerExtension);
-        const useGlobalExtents = !hasCustomExtents && guideUseRelativeExtents;
-        const upper = hasCustomExtents
-            ? g.upperExtension
-            : useGlobalExtents
-                ? guideUpperExtension
-                : null;
-        const lower = hasCustomExtents
-            ? g.lowerExtension
-            : useGlobalExtents
-                ? guideLowerExtension
-                : null;
-        const yTop = Number.isFinite(upper) ? Math.max(0, edgeY - upper) : 0;
-        const yBottom = Number.isFinite(lower) ? Math.min(guideHeight, edgeY + lower) : guideHeight;
-
-        const period = getSafeOscillatorPeriod(osc, duration);
-        const t = (osc.delay || 0) + g.edgeIndex * (period / 2);
-        if (t < 0 || t > duration) return null;
-        const x = labelColumnWidth + t * timeScale;
-
-        const lineStyle = g.style || guideStyle;
-        const dash = getDashPatternValue(lineStyle, g.dashLength || guideDashLength, g.dashGap || guideDashGap);
-        const lineWidth = g.lineWidth || guideLineWidth;
-        const isSelected = selection?.type === 'guide' && selection?.ids?.includes(g.id);
-
-        const cursor = getCursorForElement('guide');
-
-        return (
-            <g key={g.id}>
-                <line
-                    x1={x} y1={yTop} x2={x} y2={yBottom}
-                    stroke="transparent"
-                    strokeWidth={12}
-                    pointerEvents={canInteractWithElement('guide') ? 'stroke' : 'none'}
-                    style={{ cursor }}
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        if (creationMode === 'delete') {
-                            deleteGuide(g.id);
-                        } else if (onElementClick && g.id) {
-                            onElementClick('guide', g, { multi: e.shiftKey || e.ctrlKey || e.metaKey });
-                        }
-                    }}
-                />
-                <line
-                    x1={x} y1={yTop} x2={x} y2={yBottom}
-                    stroke="#000"
-                    strokeWidth={lineWidth}
-                    strokeDasharray={dash}
-                    strokeLinecap={lineStyle === 'dotted' ? 'round' : 'butt'}
-                    opacity="0.6"
-                    pointerEvents="none"
-                />
-                {isSelected && (
-                    <line
-                        x1={x} y1={yTop} x2={x} y2={yBottom}
-                        stroke="#2563eb"
-                        strokeWidth={lineWidth + 2}
-                        opacity={0.5}
-                        pointerEvents="none"
-                    />
-                )}
-            </g>
-        );
-    });
-};
+import { renderCounterSignal } from './renderers/CounterRenderer';
+import { renderGuideElements } from './renderers/GuideRenderer';
+import { renderLegend } from './renderers/LegendRenderer';
+import { renderLinkElements } from './renderers/LinkRenderer';
+import { renderOscillatorSignal } from './renderers/OscillatorRenderer';
+import { getDashPatternValue, makeSafeColorToken } from './renderers/utils';
+import { profileMeasure } from '../perf/profile';
 
 const renderMeasurementElements = ({
     measurements,
-    guides,
-    signals,
+    guidesById,
+    oscillatorsById,
     duration,
     timeScale,
     labelColumnWidth,
@@ -278,9 +38,9 @@ const renderMeasurementElements = ({
     if (!measurements?.length) return null;
 
     const resolveEdgeTime = (oscId, edgeIndex) => {
-        const osc = signals.find((s) => s.id === oscId && s.type === 'oscillator');
-        if (!osc) return null;
-        const t = (osc.delay || 0) + edgeIndex * (getSafeOscillatorPeriod(osc, duration) / 2);
+        const oscillator = oscillatorsById.get(oscId);
+        if (!oscillator) return null;
+        const t = (oscillator.delay || 0) + edgeIndex * (getSafeOscillatorPeriod(oscillator, duration) / 2);
         if (t < 0 || t > duration) return null;
         return t;
     };
@@ -288,7 +48,7 @@ const renderMeasurementElements = ({
     const resolveEndpointTime = (endpoint) => {
         if (!endpoint || typeof endpoint !== 'object') return null;
         if (endpoint.kind === 'guide') {
-            const guide = guides.find((g) => g.id === endpoint.guideId);
+            const guide = guidesById.get(endpoint.guideId);
             if (!guide) return null;
             return resolveEdgeTime(guide.oscId, guide.edgeIndex);
         }
@@ -298,9 +58,9 @@ const renderMeasurementElements = ({
         return null;
     };
 
-    return measurements.map((m, index) => {
-        const t1 = resolveEndpointTime(m.start);
-        const t2 = resolveEndpointTime(m.end);
+    return measurements.map((measurement, index) => {
+        const t1 = resolveEndpointTime(measurement.start);
+        const t2 = resolveEndpointTime(measurement.end);
         if (t1 === null || t2 === null) return null;
 
         const x1 = labelColumnWidth + t1 * timeScale;
@@ -309,18 +69,18 @@ const renderMeasurementElements = ({
         const xMax = Math.max(x1, x2);
 
         const yFallback = 24 + index * 14;
-        const y = Number.isFinite(m.y) ? m.y : yFallback;
-        const color = m.color || '#000000';
-        const width = m.lineWidth || 1.2;
-        const size = m.arrowSize ?? 10;
-        const safeColor = color.replace(/[^a-zA-Z0-9]/g, '');
+        const y = Number.isFinite(measurement.y) ? measurement.y : yFallback;
+        const color = measurement.color || '#000000';
+        const width = measurement.lineWidth || 1.2;
+        const size = measurement.arrowSize ?? 10;
+        const safeColor = makeSafeColorToken(color);
         const markerId = `${safeColor}-${Math.round(((size ?? 10) || 10) * 100)}`;
 
-        const isSelected = selection?.type === 'measurement' && selection?.ids?.includes(m.id);
+        const isSelected = selection?.type === 'measurement' && selection?.ids?.includes(measurement.id);
         const cursor = getCursorForElement('measurement');
 
         return (
-            <g key={m.id}>
+            <g key={measurement.id}>
                 <line
                     x1={xMin}
                     y1={y}
@@ -330,12 +90,12 @@ const renderMeasurementElements = ({
                     strokeWidth={12}
                     pointerEvents={canInteractWithElement('measurement') ? 'stroke' : 'none'}
                     style={{ cursor }}
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        if (creationMode === 'delete') {
-                            deleteMeasurement(m.id);
-                        } else if (onElementClick && m.id) {
-                            onElementClick('measurement', m, { multi: e.shiftKey || e.ctrlKey || e.metaKey });
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        if (creationMode === CREATION_MODES.DELETE) {
+                            deleteMeasurement(measurement.id);
+                        } else if (onElementClick && measurement.id) {
+                            onElementClick('measurement', measurement, { multi: event.shiftKey || event.ctrlKey || event.metaKey });
                         }
                     }}
                 />
@@ -363,10 +123,10 @@ const renderMeasurementElements = ({
                     />
                 )}
                 {(() => {
-                    const label = m.arrowLabel?.text;
+                    const label = measurement.arrowLabel?.text;
                     if (!label || !String(label).trim().length) return null;
-                    const sizeLabel = Math.max(6, m.arrowLabel?.size ?? defaultLabelSize ?? 10);
-                    const pos = m.arrowLabel?.position || 'top';
+                    const sizeLabel = Math.max(6, measurement.arrowLabel?.size ?? defaultLabelSize ?? 10);
+                    const pos = measurement.arrowLabel?.position || 'top';
                     const isCenter = pos === 'center';
                     const dy = pos === 'bottom' ? (sizeLabel + 6) : pos === 'top' ? -6 : 0;
                     const midX = (xMin + xMax) / 2;
@@ -411,14 +171,47 @@ const Diagram = ({
     diagramName,
     legend,
     bounds,
-    signals = [], boldEdges, toggleBoldEdge, duration, spacing,
-    guides, zones, links, layers, measurements, creationMode, timeScale,
-    lineWidth, boldWeight, fontSize, fontFamily, boldLabels, labelX, labelYOffset, labelJustify,
-    edgeArrows, edgeArrowType, edgeArrowSize, edgeArrowRatio, edgeArrowColor,
-    deleteGuide, deleteZone, deleteLink, deleteMeasurement,
-    linkLineWidth, linkStyle, linkDashLength, linkDashGap,
-    linkStartMarker, linkEndMarker, linkColor, arrowSize,
-    guideLineWidth, guideStyle, guideDashLength, guideDashGap,
+    signals = [],
+    boldEdges,
+    toggleBoldEdge,
+    duration,
+    spacing,
+    guides,
+    zones,
+    links,
+    layers,
+    measurements,
+    creationMode,
+    timeScale,
+    lineWidth,
+    boldWeight,
+    fontSize,
+    fontFamily,
+    boldLabels,
+    labelX,
+    labelYOffset,
+    labelJustify,
+    edgeArrows,
+    edgeArrowType,
+    edgeArrowSize,
+    edgeArrowRatio,
+    edgeArrowColor,
+    deleteGuide,
+    deleteZone,
+    deleteLink,
+    deleteMeasurement,
+    linkLineWidth,
+    linkStyle,
+    linkDashLength,
+    linkDashGap,
+    linkStartMarker,
+    linkEndMarker,
+    linkColor,
+    arrowSize,
+    guideLineWidth,
+    guideStyle,
+    guideDashLength,
+    guideDashGap,
     guideExtraHeight,
     guideUseRelativeExtents,
     guideUpperExtension,
@@ -426,7 +219,10 @@ const Diagram = ({
     oscWaveHeight,
     counterWaveHeight,
     signalSpacingMode,
-    zoneBorderWidth, zonePatternWidth, hatchType, zoneColor,
+    zoneBorderWidth,
+    zonePatternWidth,
+    hatchType,
+    zoneColor,
     counterFontSize,
     selection,
     clipboardType,
@@ -434,9 +230,8 @@ const Diagram = ({
     deleteEdgeArrow,
     cursorFilter
 }) => {
-    // Derived list for rendering logic
-    const oscillators = signals.filter((s) => s.type === 'oscillator');
     const layerOrder = layers && typeof layers === 'object' ? layers : null;
+
     const orderByLayer = (items, orderIds) => {
         if (!Array.isArray(items) || !items.length) return [];
         if (!Array.isArray(orderIds) || !orderIds.length) return items;
@@ -445,19 +240,88 @@ const Diagram = ({
         const remaining = items.filter((item) => !orderIds.includes(item.id));
         return [...fromOrder, ...remaining];
     };
-    const orderedGuides = useMemo(() => orderByLayer(guides || [], layerOrder?.guides), [guides, layerOrder]);
-    const orderedZones = useMemo(() => orderByLayer(zones || [], layerOrder?.zones), [zones, layerOrder]);
-    const orderedLinks = useMemo(() => orderByLayer(links || [], layerOrder?.links), [links, layerOrder]);
-    const orderedEdgeArrows = useMemo(() => orderByLayer(edgeArrows || [], layerOrder?.edgeArrows), [edgeArrows, layerOrder]);
-    const orderedMeasurements = useMemo(() => orderByLayer(measurements || [], layerOrder?.measurements), [measurements, layerOrder]);
+
+    const orderedGuides = useMemo(
+        () => profileMeasure('diagram.order.guides', () => orderByLayer(guides || [], layerOrder?.guides)),
+        [guides, layerOrder]
+    );
+    const orderedZones = useMemo(
+        () => profileMeasure('diagram.order.zones', () => orderByLayer(zones || [], layerOrder?.zones)),
+        [zones, layerOrder]
+    );
+    const orderedLinks = useMemo(
+        () => profileMeasure('diagram.order.links', () => orderByLayer(links || [], layerOrder?.links)),
+        [links, layerOrder]
+    );
+    const orderedEdgeArrows = useMemo(
+        () => profileMeasure('diagram.order.edgeArrows', () => orderByLayer(edgeArrows || [], layerOrder?.edgeArrows)),
+        [edgeArrows, layerOrder]
+    );
+    const orderedMeasurements = useMemo(
+        () => profileMeasure('diagram.order.measurements', () => orderByLayer(measurements || [], layerOrder?.measurements)),
+        [measurements, layerOrder]
+    );
+
     const effectiveSettings = useMemo(() => ({
         spacing,
         signalSpacingMode,
         oscWaveHeight,
         counterWaveHeight
     }), [spacing, signalSpacingMode, oscWaveHeight, counterWaveHeight]);
-    const signalRows = useMemo(() => computeSignalLayout(signals, effectiveSettings), [signals, effectiveSettings]);
-    const signalLayoutById = useMemo(() => makeSignalLayoutMap(signalRows), [signalRows]);
+
+    const signalRows = useMemo(
+        () => profileMeasure('diagram.layout.rows', () => computeSignalLayout(signals, effectiveSettings)),
+        [signals, effectiveSettings]
+    );
+    const signalLayoutById = useMemo(
+        () => profileMeasure('diagram.layout.map', () => makeSignalLayoutMap(signalRows)),
+        [signalRows]
+    );
+
+    const signalsById = useMemo(
+        () => profileMeasure('diagram.lookup.signals', () => new Map(signals.map((signal) => [signal.id, signal]))),
+        [signals]
+    );
+    const oscillators = useMemo(
+        () => profileMeasure('diagram.lookup.oscillators.list', () => signals.filter((signal) => signal.type === SIGNAL_TYPES.OSCILLATOR)),
+        [signals]
+    );
+    const oscillatorsById = useMemo(
+        () => profileMeasure('diagram.lookup.oscillators.map', () => new Map(oscillators.map((oscillator) => [oscillator.id, oscillator]))),
+        [oscillators]
+    );
+    const guidesById = useMemo(
+        () => profileMeasure('diagram.lookup.guides', () => new Map(orderedGuides.map((guide) => [guide.id, guide]))),
+        [orderedGuides]
+    );
+
+    const zonesByOscillatorId = useMemo(
+        () => profileMeasure('diagram.lookup.zonesByOsc', () => {
+            const map = new Map();
+            orderedZones.forEach((zone) => {
+                const key = zone.oscillatorId;
+                if (!key) return;
+                if (!map.has(key)) map.set(key, []);
+                map.get(key).push(zone);
+            });
+            return map;
+        }),
+        [orderedZones]
+    );
+
+    const edgeArrowsByOscillatorId = useMemo(
+        () => profileMeasure('diagram.lookup.edgeArrowsByOsc', () => {
+            const map = new Map();
+            orderedEdgeArrows.forEach((arrow) => {
+                const key = arrow.oscId;
+                if (!key) return;
+                if (!map.has(key)) map.set(key, []);
+                map.get(key).push(arrow);
+            });
+            return map;
+        }),
+        [orderedEdgeArrows]
+    );
 
     const labelColumnWidth = DIAGRAM_LABEL_COLUMN_WIDTH;
     const extraLeft = Math.max(0, -(labelX || 0));
@@ -465,29 +329,29 @@ const Diagram = ({
 
     const baseHeight = Math.max(DIAGRAM_MIN_HEIGHT, computeDiagramHeightFromLayout(signalRows));
     const height = baseHeight;
-    const guideHeight = Math.min(height, Math.max(0, height + (guideExtraHeight || 0)));
+    const guideHeight = Math.max(0, height + (guideExtraHeight || 0));
 
     const isDefaultMode = creationMode === null;
-    const isCopyMode = creationMode === 'copy';
-    const isPasteMode = creationMode === 'paste';
-    const isDeleteMode = creationMode === 'delete';
-    const isMeasureMode = Boolean(creationMode && creationMode.startsWith('measure'));
-    const isEdgeMode = creationMode === 'bold' || creationMode === 'edge-arrow' || creationMode === 'guide' || creationMode === 'zone-start' || creationMode === 'zone-end' || creationMode === 'link-start' || creationMode === 'link-end';
+    const isCopyMode = creationMode === CREATION_MODES.COPY;
+    const isPasteMode = creationMode === CREATION_MODES.PASTE;
+    const isDeleteMode = creationMode === CREATION_MODES.DELETE;
+    const isMeasureToolMode = isMeasureMode(creationMode);
+    const isEdgeMode = isEdgeToolMode(creationMode);
 
     const getCursorForElement = (type) => {
         if (cursorFilter) return type === cursorFilter ? 'pointer' : 'default';
         if (isDeleteMode && (type === 'guide' || type === 'zone' || type === 'link' || type === 'edge-arrow' || type === 'measurement')) return 'pointer';
-        if (isMeasureMode) return (type === 'guide' || type === 'edge') ? 'pointer' : 'default';
+        if (isMeasureToolMode) return (type === 'guide' || type === 'edge') ? 'pointer' : 'default';
         if (isEdgeMode) return type === 'edge' ? 'pointer' : 'default';
-        if (isCopyMode) return type === 'edge' ? 'pointer' : 'pointer';
+        if (isCopyMode) return 'pointer';
         if (isPasteMode) return clipboardType === type ? 'pointer' : 'default';
-        if (isDefaultMode) return type === 'edge' ? 'pointer' : 'pointer';
+        if (isDefaultMode) return 'pointer';
         return 'default';
     };
 
     const getCursorForEdge = (isBold) => {
         if (cursorFilter) return cursorFilter === 'edge' ? 'pointer' : 'default';
-        if (isMeasureMode) return 'pointer';
+        if (isMeasureToolMode) return 'pointer';
         if (isEdgeMode) return 'pointer';
         if (isDeleteMode) return isBold ? 'pointer' : 'default';
         if (isPasteMode) return clipboardType === 'edge' ? 'pointer' : 'default';
@@ -508,7 +372,7 @@ const Diagram = ({
         if (cursorFilter) return type === cursorFilter;
         if (type === 'edge') {
             if (isDeleteMode) return true;
-            if (isMeasureMode) return true;
+            if (isMeasureToolMode) return true;
             if (isEdgeMode) return true;
             if (isCopyMode) return true;
             if (isPasteMode) return clipboardType === 'edge';
@@ -523,7 +387,7 @@ const Diagram = ({
             if (isDefaultMode) return true;
             return false;
         }
-        if (isMeasureMode) return type === 'guide';
+        if (isMeasureToolMode) return type === 'guide';
         if (isDeleteMode) return type === 'guide' || type === 'zone' || type === 'link' || type === 'edge-arrow' || type === 'measurement';
         if (isEdgeMode) return false;
         if (isCopyMode) return type === 'guide' || type === 'zone' || type === 'link';
@@ -534,537 +398,49 @@ const Diagram = ({
 
     const edgeTimeCtx = useMemo(() => ({ oscillators, duration }), [oscillators, duration]);
 
-    const renderOscillator = (osc) => {
-        const row = signalLayoutById.get(osc.id);
-        if (!row) return null;
-        const yBase = row.bottom;
-        const waveHeight = row.height;
-        const halfPeriod = getSafeOscillatorPeriod(osc, duration) / 2;
-        const delay = osc.delay || 0;
-        const edgeLimit = osc.edgeCount ?? -1;
-        const maxEdgeIndex = edgeLimit >= 0 ? edgeLimit - 1 : Infinity;
-        const waveElements = [];
-        const edgeElements = [];
-
-        const startK = delay < 0 ? Math.ceil(-delay / halfPeriod) : 0;
-        const endKByDuration = Math.floor((duration - delay) / halfPeriod);
-        const endK = Math.min(endKByDuration, maxEdgeIndex);
-
-        const tFirst = delay + startK * halfPeriod;
-        const levelAtZero = getOscillatorLevelAt(osc, 0, duration);
-        const yAtZero = levelAtZero === 1 ? yBase - waveHeight : yBase;
-        const drawUntil = startK > endK ? duration : Math.min(tFirst, duration);
-        if (drawUntil > 0) {
-            const xEnd = Math.min(labelColumnWidth + drawUntil * timeScale, labelColumnWidth + duration * timeScale);
-            waveElements.push(
-                <line
-                    key={`${osc.id}-init`}
-                    x1={labelColumnWidth}
-                    y1={yAtZero}
-                    x2={xEnd}
-                    y2={yAtZero}
-                    stroke={osc.color || '#000'}
-                    strokeWidth={lineWidth}
-                    strokeLinecap="square"
-                    pointerEvents="none"
-                />
-            );
-        }
-
-        for (let k = startK; k <= endK; k++) {
-            const tToken = delay + k * halfPeriod;
-            if (tToken >= duration) break;
-            if (tToken < 0) continue;
-
-            const nextT = delay + (k + 1) * halfPeriod;
-            const isLastEdgeByCount = edgeLimit >= 0 && k === maxEdgeIndex;
-            const tEnd = Math.min(isLastEdgeByCount ? duration : nextT, duration);
-
-            const baseLevel = (k % 2 === 0) ? 1 : 0;
-            const level = osc.inverted ? (1 - baseLevel) : baseLevel;
-
-            const y = level === 1 ? yBase - waveHeight : yBase;
-            const xStart = labelColumnWidth + tToken * timeScale;
-            const xEnd = labelColumnWidth + tEnd * timeScale;
-
-            waveElements.push(
-                <line
-                    key={`${osc.id}-h-${k}`}
-                    x1={xStart}
-                    y1={y}
-                    x2={xEnd}
-                    y2={y}
-                    stroke={osc.color || '#000'}
-                    strokeWidth={lineWidth}
-                    strokeLinecap="square"
-                    pointerEvents="none"
-                />
-            );
-
-            const y1 = level === 1 ? yBase : yBase - waveHeight;
-            const y2 = level === 1 ? yBase - waveHeight : yBase;
-
-            const edgeId = `${osc.id}-v-${k}`;
-            const boldEdge = boldEdges.get(edgeId);
-            const isBold = Boolean(boldEdge);
-            const edgeWeight = boldEdge?.weight ?? boldWeight;
-            const isSelected = selection?.type === 'edge' && selection?.ids?.includes(edgeId);
-
-            waveElements.push(
-                <line
-                    key={`${osc.id}-v-${k}`}
-                    x1={xStart}
-                    y1={y1}
-                    x2={xStart}
-                    y2={y2}
-                    stroke={osc.color || '#000'}
-                    strokeWidth={isBold ? edgeWeight : lineWidth}
-                    pointerEvents="none"
-                />
-            );
-
-            edgeElements.push(
-                <line
-                    key={`hit-${edgeId}`}
-                    x1={xStart}
-                    y1={yBase}
-                    x2={xStart}
-                    y2={yBase - waveHeight}
-                    stroke="transparent"
-                    strokeWidth={14}
-                    pointerEvents={canInteractWithElement('edge') ? 'stroke' : 'none'}
-                    style={{ cursor: getCursorForEdge(isBold) }}
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        if (cursorFilter || creationMode === null || creationMode === 'copy' || creationMode === 'paste') {
-                            if (onElementClick && canSelectEdge(isBold)) {
-                                onElementClick('edge', { id: edgeId, weight: edgeWeight }, { multi: e.shiftKey || e.ctrlKey || e.metaKey });
-                            }
-                        } else {
-                            toggleBoldEdge(edgeId, { oscId: osc.id, edgeIndex: k, oscillatorId: osc.id, signalIndex: row.index });
-                        }
-                    }}
-                />
-            );
-
-            if (isSelected) {
-                waveElements.push(
-                    <line
-                        key={`sel-${edgeId}`}
-                        x1={xStart}
-                        y1={y1}
-                        x2={xStart}
-                        y2={y2}
-                        stroke="#2563eb"
-                        strokeWidth={(isBold ? edgeWeight : lineWidth) + 2}
-                        opacity={0.6}
-                        pointerEvents="none"
-                    />
-                );
-            }
-        }
-
-        const arrowElements = orderedEdgeArrows.filter((arrow) => arrow.oscId === osc.id).map((arrow) => {
-            if (edgeLimit >= 0 && arrow.edgeIndex > maxEdgeIndex) return null;
-            const tEdge = delay + arrow.edgeIndex * halfPeriod;
-            if (tEdge < 0 || tEdge > duration) return null;
-
-            const baseLevel = (arrow.edgeIndex % 2 === 0) ? 1 : 0;
-            const level = osc.inverted ? (1 - baseLevel) : baseLevel;
-            const direction = level === 1 ? -1 : 1;
-            const size = Math.max(2, arrow.size ?? edgeArrowSize ?? 10);
-            const ratioValue = arrow.ratio ?? edgeArrowRatio ?? 1;
-            const ratio = Math.min(2, Math.max(0.5, ratioValue));
-            const arrowLength = size * ratio;
-            const arrowWidth = size;
-            const halfLength = arrowLength / 2;
-            const halfWidth = arrowWidth / 2;
-
-            const x = labelColumnWidth + tEdge * timeScale;
-            const yCenter = row.mid;
-            const tipY = yCenter + direction * halfLength;
-            const baseY = yCenter - direction * halfLength;
-            const leftX = x - halfWidth;
-            const rightX = x + halfWidth;
-            const points = `${x} ${tipY}, ${leftX} ${baseY}, ${rightX} ${baseY}`;
-            const openPoints = `${leftX} ${baseY}, ${x} ${tipY}, ${rightX} ${baseY}`;
-
-            const arrowType = arrow.type ?? edgeArrowType;
-            const arrowColor = arrow.color ?? edgeArrowColor ?? '#000';
-            const isSelected = selection?.type === 'edge-arrow' && selection?.ids?.includes(arrow.id);
-
-            const cursor = getCursorForElement('edge-arrow');
-            const canInteract = canInteractWithElement('edge-arrow');
-
-            return (
-                <g key={arrow.id}>
-                    {arrowType === 'open' ? (
-                        <polyline
-                            points={openPoints}
-                            fill="none"
-                            stroke={arrowColor}
-                            strokeWidth={Math.max(1, size * 0.12)}
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            pointerEvents="none"
-                        />
-                    ) : (
-                        <polygon
-                            points={points}
-                            fill={arrowColor}
-                            stroke="none"
-                            pointerEvents="none"
-                        />
-                    )}
-                    <polygon
-                        points={points}
-                        fill="transparent"
-                        stroke="transparent"
-                        strokeWidth={Math.max(8, size)}
-                        pointerEvents={canInteract ? 'all' : 'none'}
-                        style={{ cursor }}
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            if (creationMode === 'delete') {
-                                deleteEdgeArrow(arrow.id);
-                            } else if (onElementClick && arrow.id) {
-                                onElementClick('edge-arrow', arrow, { multi: e.shiftKey || e.ctrlKey || e.metaKey });
-                            }
-                        }}
-                    />
-                    {isSelected && (
-                        <polygon
-                            points={points}
-                            fill="none"
-                            stroke="#2563eb"
-                            strokeWidth={2}
-                            opacity={0.7}
-                            pointerEvents="none"
-                        />
-                    )}
-                    {(() => {
-                        const label = arrow.arrowLabel?.text;
-                        if (!label || !String(label).trim().length) return null;
-                        const sizeLabel = Math.max(6, arrow.arrowLabel?.size ?? fontSize ?? 10);
-                        const pos = arrow.arrowLabel?.position || 'above';
-                        const isCenter = pos === 'center';
-                        const dy = pos === 'below' ? (sizeLabel + 6) : pos === 'above' ? -(sizeLabel + 6) : 0;
-                        const textValue = String(label);
-                        const padX = 6;
-                        const padY = 3;
-                        const labelW = textValue.length * sizeLabel * 0.62 + padX * 2;
-                        const labelH = sizeLabel + padY * 2;
-                        const textY = yCenter + dy;
-                        return (
-                            <g pointerEvents="none">
-                                {isCenter && (
-                                    <rect
-                                        x={x - labelW / 2}
-                                        y={textY - sizeLabel * 0.82}
-                                        width={labelW}
-                                        height={labelH}
-                                        fill="#ffffff"
-                                        rx={3}
-                                        ry={3}
-                                    />
-                                )}
-                                <text
-                                    x={x}
-                                    y={textY}
-                                    fontSize={sizeLabel}
-                                    fontFamily={fontFamily}
-                                    fill={arrowColor}
-                                    textAnchor="middle"
-                                >
-                                    {textValue}
-                                </text>
-                            </g>
-                        );
-                    })()}
-                </g>
-            );
-        });
-
-        const oscillatorZones = orderedZones.filter((z) => z.oscillatorId === osc.id);
-        const hatchVisualElements = [];
-        const hatchHitElements = [];
-        oscillatorZones.forEach((z) => {
-            const oStart = oscillators.find((o) => o.id === z.start.oscId);
-            const oEnd = oscillators.find((o) => o.id === z.end.oscId);
-            if (!oStart || !oEnd) return;
-
-            const startHalfPeriod = getSafeOscillatorPeriod(oStart, duration) / 2;
-            const endHalfPeriod = getSafeOscillatorPeriod(oEnd, duration) / 2;
-            const tStart = (oStart.delay || 0) + z.start.edgeIndex * startHalfPeriod;
-            const tEnd = (oEnd.delay || 0) + z.end.edgeIndex * endHalfPeriod;
-
-            const xMin = labelColumnWidth + Math.min(tStart, tEnd) * timeScale;
-            const xMax = labelColumnWidth + Math.max(tStart, tEnd) * timeScale;
-            const clipX1 = Math.max(labelColumnWidth, xMin);
-            const clipX2 = Math.min(labelColumnWidth + duration * timeScale, xMax);
-            if (clipX1 >= clipX2) return;
-
-            const isSelected = selection?.type === 'zone' && selection?.ids?.includes(z.id);
-            const hatchColor = z.color || zoneColor || '#000';
-            const patternWidth = z.patternWidth ?? zonePatternWidth ?? 1;
-            const patternId = `${(z.hatchType || hatchType)}-${hatchColor.replace(/[^a-zA-Z0-9]/g, '')}-${Math.round((patternWidth || 1) * 100)}`;
-            const canInteract = canInteractWithElement('zone');
-
-            hatchVisualElements.push(
-                <g key={`zone-visual-${z.id}`}>
-                    <rect
-                        x={clipX1}
-                        y={yBase - waveHeight}
-                        width={clipX2 - clipX1}
-                        height={waveHeight}
-                        fill={`url(#${patternId})`}
-                        stroke={z.color || (z.borderWidth > 0 ? '#000' : 'none')}
-                        strokeWidth={z.borderWidth !== undefined ? z.borderWidth : zoneBorderWidth}
-                        pointerEvents="none"
-                    />
-                    {isSelected && (
-                        <rect
-                            x={clipX1}
-                            y={yBase - waveHeight}
-                            width={clipX2 - clipX1}
-                            height={waveHeight}
-                            fill="none"
-                            stroke="#2563eb"
-                            strokeWidth={2}
-                            opacity={0.7}
-                            pointerEvents="none"
-                        />
-                    )}
-                </g>
-            );
-
-            hatchHitElements.push(
-                <rect
-                    key={`zone-hit-${z.id}`}
-                    x={clipX1}
-                    y={yBase - waveHeight}
-                    width={clipX2 - clipX1}
-                    height={waveHeight}
-                    fill="#ffffff"
-                    fillOpacity={0.001}
-                    stroke="none"
-                    style={{ cursor: getCursorForElement('zone') }}
-                    pointerEvents={canInteract ? 'all' : 'none'}
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        if (creationMode === 'delete') {
-                            deleteZone(z.id);
-                        } else if (onElementClick && z.id) {
-                            onElementClick('zone', z, { multi: e.shiftKey || e.ctrlKey || e.metaKey });
-                        }
-                    }}
-                />
-            );
-        });
-
-        return (
-            <g key={osc.id}>
-                <text
-                    x={labelX}
-                    y={row.mid + labelYOffset}
-                    fontSize={fontSize}
-                    fontWeight={boldLabels ? 'bold' : 'normal'}
-                    fontFamily={fontFamily}
-                    fill="#000"
-                    textAnchor={labelJustify || 'start'}
-                    dominantBaseline="middle"
-                >
-                    {osc.name}
-                </text>
-                {hatchVisualElements}
-                {waveElements}
-                {edgeElements}
-                {hatchHitElements}
-                {arrowElements}
-            </g>
-        );
-    };
-
-    const renderCounter = (cnt) => {
-        const row = signalLayoutById.get(cnt.id);
-        if (!row) return null;
-        const yBase = row.bottom;
-        const boxHeight = row.height;
-
-        const targetOsc = cnt.referenceOscId ? oscillators.find((o) => o.id === cnt.referenceOscId) : oscillators[0];
-        if (!targetOsc) return null;
-
-        const halfPeriod = getSafeOscillatorPeriod(targetOsc, duration) / 2;
-        const delay = targetOsc.delay || 0;
-        const polarity = cnt.polarity || 'rising';
-        const startEdgeNum = cnt.startEdge || 1;
-        const endEdgeNum = cnt.endEdge || 10;
-        const edgeLimit = targetOsc.edgeCount ?? -1;
-        const maxEdgeIndex = edgeLimit >= 0 ? edgeLimit - 1 : Infinity;
-
-        const allValidEdges = [];
-        const maxK = Math.floor((duration - delay) / halfPeriod);
-        const minK = Math.floor((-delay) / halfPeriod);
-
-        for (let k = minK; k <= maxK; k++) {
-            if (k >= 0 && k > maxEdgeIndex) break;
-            const t = delay + k * halfPeriod;
-            if (t < 0 || t > duration) continue;
-
-            const isRefRising = (k % 2 === 0);
-            const effectiveRising = targetOsc.inverted ? !isRefRising : isRefRising;
-            const matches = (polarity === 'rising' && effectiveRising) || (polarity === 'falling' && !effectiveRising);
-            if (matches) allValidEdges.push(t);
-        }
-
-        const segments = [];
-        let currentCount = 0;
-        let segmentStartT = 0;
-        allValidEdges.forEach((tEdge, idx) => {
-            const edgeNum = idx + 1;
-            let nextCount = currentCount;
-            if (edgeNum >= startEdgeNum && edgeNum <= endEdgeNum) {
-                nextCount++;
-            }
-            if (nextCount !== currentCount) {
-                segments.push({ t1: segmentStartT, t2: tEdge, val: currentCount });
-                segmentStartT = tEdge;
-                currentCount = nextCount;
-            }
-        });
-        segments.push({ t1: segmentStartT, t2: duration, val: currentCount });
-
-        return (
-            <g key={cnt.id}>
-                <text
-                    x={labelX}
-                    y={row.mid + labelYOffset}
-                    fontSize={fontSize}
-                    fontWeight={boldLabels ? 'bold' : 'normal'}
-                    fontFamily={fontFamily}
-                    fill="#000"
-                    textAnchor={labelJustify || 'start'}
-                    dominantBaseline="middle"
-                >
-                    {cnt.name}
-                </text>
-
-                {segments.map((seg, sIdx) => {
-                    const x1 = labelColumnWidth + seg.t1 * timeScale;
-                    const x2 = labelColumnWidth + seg.t2 * timeScale;
-                    if (x1 >= x2) return null;
-                    return (
-                        <g key={sIdx}>
-                            <line x1={x1} y1={yBase - boxHeight} x2={x2} y2={yBase - boxHeight} stroke={cnt.color || '#000'} strokeWidth={lineWidth} />
-                            <line x1={x1} y1={yBase} x2={x2} y2={yBase} stroke={cnt.color || '#000'} strokeWidth={lineWidth} />
-                            {seg.t1 > 0 && (
-                                <line x1={x1} y1={yBase} x2={x1} y2={yBase - boxHeight} stroke={cnt.color || '#000'} strokeWidth={lineWidth} />
-                            )}
-                            <text
-                                x={(x1 + x2) / 2}
-                                y={yBase - boxHeight / 2}
-                                dy="0.35em"
-                                textAnchor="middle"
-                                fontSize={counterFontSize || fontSize * 0.9}
-                                fontFamily={fontFamily}
-                                fill={cnt.color || '#000'}
-                            >
-                                {seg.val}
-                            </text>
-                        </g>
-                    );
-                })}
-
-                {allValidEdges.map((tEdge, idx) => {
-                    const x = labelColumnWidth + tEdge * timeScale;
-                    const edgeId = `cnt-${cnt.id}-e-${idx + 1}`;
-                    const isBold = boldEdges.has(edgeId);
-                    const isSelected = selection?.type === 'edge' && selection?.ids?.includes(edgeId);
-                    return (
-                        <g key={edgeId}>
-                            <line
-                                x1={x}
-                                y1={yBase}
-                                x2={x}
-                                y2={yBase - boxHeight}
-                                stroke="transparent"
-                                strokeWidth={14}
-                                pointerEvents={canInteractWithElement('edge') ? 'stroke' : 'none'}
-                                style={{ cursor: getCursorForEdge(isBold) }}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (cursorFilter || creationMode === null || creationMode === 'copy' || creationMode === 'paste') {
-                                        if (onElementClick && canSelectEdge(isBold)) {
-                                            onElementClick('edge', { id: edgeId, isBold }, { multi: e.shiftKey || e.ctrlKey || e.metaKey });
-                                        }
-                                    } else {
-                                        toggleBoldEdge(edgeId, { counterId: cnt.id, edgeIndex: idx + 1, signalIndex: row.index });
-                                    }
-                                }}
-                            />
-                            {isSelected && (
-                                <line
-                                    x1={x}
-                                    y1={yBase}
-                                    x2={x}
-                                    y2={yBase - boxHeight}
-                                    stroke="#2563eb"
-                                    strokeWidth={2}
-                                    opacity={0.6}
-                                    pointerEvents="none"
-                                />
-                            )}
-                        </g>
-                    );
-                })}
-            </g>
-        );
-    };
-
     const hatchPatterns = useMemo(() => {
         const map = new Map();
-        zones.forEach((zone) => {
+
+        orderedZones.forEach((zone) => {
             const type = zone.hatchType || hatchType;
             const color = zone.color || zoneColor || '#000';
-            const lineWidth = zone.patternWidth ?? zonePatternWidth ?? 1;
-            const key = `${type}|${color}|${lineWidth}`;
-            if (!map.has(key)) {
-                const safeColor = color.replace(/[^a-zA-Z0-9]/g, '');
-                map.set(key, {
-                    id: `${type}-${safeColor}-${Math.round((lineWidth || 1) * 100)}`,
-                    type,
-                    color,
-                    lineWidth
-                });
-            }
+            const widthValue = zone.patternWidth ?? zonePatternWidth ?? 1;
+            const key = `${type}|${color}|${widthValue}`;
+            if (map.has(key)) return;
+            map.set(key, {
+                id: `${type}-${makeSafeColorToken(color)}-${Math.round((widthValue || 1) * 100)}`,
+                type,
+                color,
+                lineWidth: widthValue
+            });
         });
+
         (legend?.entries || []).forEach((entry) => {
             if (!entry || typeof entry !== 'object') return;
             if (entry.type !== 'hatch') return;
             const type = entry.hatchType || hatchType;
             const color = entry.color || zoneColor || '#000';
-            const lineWidth = entry.patternWidth ?? zonePatternWidth ?? 1;
-            const key = `${type}|${color}|${lineWidth}`;
-            if (!map.has(key)) {
-                const safeColor = color.replace(/[^a-zA-Z0-9]/g, '');
-                map.set(key, {
-                    id: `${type}-${safeColor}-${Math.round((lineWidth || 1) * 100)}`,
-                    type,
-                    color,
-                    lineWidth
-                });
-            }
+            const widthValue = entry.patternWidth ?? zonePatternWidth ?? 1;
+            const key = `${type}|${color}|${widthValue}`;
+            if (map.has(key)) return;
+            map.set(key, {
+                id: `${type}-${makeSafeColorToken(color)}-${Math.round((widthValue || 1) * 100)}`,
+                type,
+                color,
+                lineWidth: widthValue
+            });
         });
+
         return Array.from(map.values());
-    }, [zones, legend, hatchType, zoneColor, zonePatternWidth]);
+    }, [orderedZones, legend, hatchType, zoneColor, zonePatternWidth]);
 
     const defaultLinkDash = useMemo(
         () => getDashPatternValue(linkStyle, linkDashLength, linkDashGap),
         [linkStyle, linkDashLength, linkDashGap]
     );
 
-    const renderPattern = ({ id, type, color, lineWidth }) => {
-        const strokeWidth = Math.max(0.1, lineWidth || 1);
+    const renderPattern = ({ id, type, color, lineWidth: patternLineWidth }) => {
+        const strokeWidth = Math.max(0.1, patternLineWidth || 1);
         if (type === 'hatch-45') {
             return (
                 <pattern key={id} id={id} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -1102,7 +478,7 @@ const Diagram = ({
         const map = new Map();
         const addMarker = (color, size) => {
             if (!color) return;
-            const safeColor = color.replace(/[^a-zA-Z0-9]/g, '');
+            const safeColor = makeSafeColorToken(color);
             const safeSize = Math.round(((size ?? 10) || 10) * 100);
             const key = `${safeColor}-${safeSize}`;
             if (map.has(key)) return;
@@ -1114,11 +490,11 @@ const Diagram = ({
         };
 
         addMarker(linkColor, arrowSize);
-        (links || []).forEach((link) => {
+        orderedLinks.forEach((link) => {
             addMarker(link.color || linkColor, link.arrowSize ?? arrowSize);
         });
-        (measurements || []).forEach((m) => {
-            addMarker(m.color || '#000000', m.arrowSize ?? arrowSize);
+        orderedMeasurements.forEach((measurement) => {
+            addMarker(measurement.color || '#000000', measurement.arrowSize ?? arrowSize);
         });
         (legend?.entries || []).forEach((entry) => {
             if (!entry || typeof entry !== 'object') return;
@@ -1127,7 +503,7 @@ const Diagram = ({
         });
 
         return Array.from(map.values());
-    }, [links, measurements, legend, linkColor, arrowSize]);
+    }, [orderedLinks, orderedMeasurements, legend, linkColor, arrowSize]);
 
     const legendBox = useMemo(() => {
         if (bounds?.legendBox) return bounds.legendBox;
@@ -1175,15 +551,79 @@ const Diagram = ({
                 })}
             </defs>
 
-            {signals.map((signal) => (
-                signal.type === 'counter'
-                    ? renderCounter(signal)
-                    : renderOscillator(signal)
-            ))}
+            {signals.map((signal) => {
+                const row = signalLayoutById.get(signal.id);
+                if (signal.type === SIGNAL_TYPES.COUNTER) {
+                    return renderCounterSignal({
+                        counter: signal,
+                        row,
+                        oscillators,
+                        duration,
+                        timeScale,
+                        labelColumnWidth,
+                        lineWidth,
+                        boldEdges,
+                        selection,
+                        creationMode,
+                        cursorFilter,
+                        canInteractWithElement,
+                        getCursorForEdge,
+                        canSelectEdge,
+                        toggleBoldEdge,
+                        onElementClick,
+                        fontSize,
+                        fontFamily,
+                        boldLabels,
+                        labelX,
+                        labelYOffset,
+                        labelJustify,
+                        counterFontSize
+                    });
+                }
+
+                return renderOscillatorSignal({
+                    oscillator: signal,
+                    row,
+                    duration,
+                    timeScale,
+                    labelColumnWidth,
+                    lineWidth,
+                    boldWeight,
+                    boldEdges,
+                    selection,
+                    creationMode,
+                    cursorFilter,
+                    canInteractWithElement,
+                    getCursorForEdge,
+                    canSelectEdge,
+                    toggleBoldEdge,
+                    onElementClick,
+                    fontFamily,
+                    fontSize,
+                    boldLabels,
+                    labelX,
+                    labelYOffset,
+                    labelJustify,
+                    edgeArrowsByOscillatorId,
+                    edgeArrowType,
+                    edgeArrowSize,
+                    edgeArrowRatio,
+                    edgeArrowColor,
+                    deleteEdgeArrow,
+                    zonesByOscillatorId,
+                    oscillatorsById,
+                    deleteZone,
+                    getCursorForElement,
+                    hatchType,
+                    zoneColor,
+                    zonePatternWidth,
+                    zoneBorderWidth
+                });
+            })}
 
             {renderLinkElements({
                 links: orderedLinks,
-                signals,
+                signalsById,
                 signalLayoutById,
                 timeScale,
                 labelColumnWidth,
@@ -1207,7 +647,7 @@ const Diagram = ({
 
             {renderGuideElements({
                 guides: orderedGuides,
-                signals,
+                oscillatorsById,
                 signalLayoutById,
                 duration,
                 timeScale,
@@ -1230,8 +670,8 @@ const Diagram = ({
 
             {renderMeasurementElements({
                 measurements: orderedMeasurements,
-                guides: orderedGuides,
-                signals,
+                guidesById,
+                oscillatorsById,
                 duration,
                 timeScale,
                 labelColumnWidth,
@@ -1245,78 +685,15 @@ const Diagram = ({
                 defaultLabelSize: fontSize
             })}
 
-            {legendBox && (legend?.entries || []).length ? (
-                <g>
-                    <rect
-                        x={legendBox.x}
-                        y={legendBox.y}
-                        width={legendBox.width}
-                        height={legendBox.height}
-                        rx={Math.max(0, legend?.layout?.cornerRadius || 0)}
-                        ry={Math.max(0, legend?.layout?.cornerRadius || 0)}
-                        fill="#ffffff"
-                        opacity={0.95}
-                        stroke={legend?.layout?.border ? '#0f172a' : 'none'}
-                        strokeWidth={legend?.layout?.border ? (legend?.layout?.borderWidth || 1) : 0}
-                    />
-                    {(legend?.entries || []).map((entry, idx) => {
-                        if (!entry || typeof entry !== 'object') return null;
-                        const rowY = legendBox.y + legendBox.padding + idx * (legendBox.rowHeight + legendBox.gap);
-                        const midY = rowY + legendBox.rowHeight / 2;
-                        const symbolX = legendBox.x + legendBox.padding;
-                        const textX = symbolX + legendBox.symbolWidth + legendBox.labelGap;
-                        const color = entry.color || '#000000';
-                        const lineW = entry.lineWidth || 1.2;
-
-                        const safeColor = color.replace(/[^a-zA-Z0-9]/g, '');
-                        const markerSize = entry.arrowSize ?? arrowSize ?? 10;
-                        const markerId = `${safeColor}-${Math.round(((markerSize ?? 10) || 10) * 100)}`;
-
-                        return (
-                            <g key={entry.id || `${idx}`}>
-                                {entry.type === 'hatch' ? (
-                                    (() => {
-                                        const type = entry.hatchType || hatchType;
-                                        const w = entry.patternWidth ?? zonePatternWidth ?? 1;
-                                        const pid = `${type}-${safeColor}-${Math.round(((w ?? 1) || 1) * 100)}`;
-                                        return (
-                                            <rect
-                                                x={symbolX}
-                                                y={rowY + 2}
-                                                width={legendBox.symbolWidth}
-                                                height={legendBox.rowHeight - 4}
-                                                fill={`url(#${pid})`}
-                                                stroke={color}
-                                                strokeWidth={Math.max(0.5, lineW)}
-                                                opacity={0.9}
-                                            />
-                                        );
-                                    })()
-                                ) : (
-                                    <line
-                                        x1={symbolX}
-                                        y1={midY}
-                                        x2={symbolX + legendBox.symbolWidth}
-                                        y2={midY}
-                                        stroke={color}
-                                        strokeWidth={lineW}
-                                        markerEnd={entry.type === 'arrow' ? `url(#arrowhead-${markerId})` : 'none'}
-                                    />
-                                )}
-                                <text
-                                    x={textX}
-                                    y={midY + (fontSize * 0.35)}
-                                    fontSize={fontSize}
-                                    fontFamily={fontFamily}
-                                    fill="#0f172a"
-                                >
-                                    {entry.label || ''}
-                                </text>
-                            </g>
-                        );
-                    })}
-                </g>
-            ) : null}
+            {renderLegend({
+                legend,
+                legendBox,
+                fontSize,
+                fontFamily,
+                arrowSize,
+                hatchType,
+                zonePatternWidth
+            })}
         </svg>
     );
 };
